@@ -16,6 +16,8 @@ const HIT_RADIUS = 0.36;
 const CHEST_HEIGHT = 0.3;
 /** Ignore the pinch that pressed Start. */
 const START_GRACE = 0.4;
+/** Throws within this angle of a ninja's intercept point snap onto it. */
+const AIM_ASSIST_COS = Math.cos((8 * Math.PI) / 180);
 const HANDS = ['left', 'right'] as const;
 
 /**
@@ -40,6 +42,9 @@ export class ThrowSystem extends createSystem({
   private toNinja = new Vector3();
   private closest = new Vector3();
   private head = new Vector3();
+  private intercept = new Vector3();
+  private bestIntercept = new Vector3();
+  private velocity = new Vector3();
 
   init(): void {
     this.game = this.world.getSystem(GameSystem);
@@ -98,6 +103,7 @@ export class ThrowSystem extends createSystem({
   }
 
   private throwStar(): void {
+    this.applyAimAssist();
     const object = this.prototype.clone();
     object.position.copy(this.origin).addScaledVector(this.direction, 0.12);
     const star = this.world.createTransformEntity(object);
@@ -109,6 +115,44 @@ export class ThrowSystem extends createSystem({
         this.direction.y * THROW_SPEED,
         this.direction.z * THROW_SPEED,
       ]);
+  }
+
+  /**
+   * Redirect `direction` at the predicted chest position of the ninja closest
+   * to the throw line, if one is inside the assist cone. Runners are led by
+   * their ground velocity; leapers are close enough to aim at directly.
+   */
+  private applyAimAssist(): void {
+    let bestCos = AIM_ASSIST_COS;
+    let found = false;
+    for (const ninja of this.queries.ninjas.entities) {
+      const phase = ninja.getValue(Ninja, 'phase');
+      const target = ninja.object3D;
+      if (phase === NinjaPhase.Defeated || target == null) continue;
+
+      this.velocity.set(0, 0, 0);
+      if (phase === NinjaPhase.Running) {
+        const t = ninja.getVectorView(Ninja, 'target');
+        this.velocity.set(t[0] - target.position.x, 0, t[2] - target.position.z);
+        this.velocity.normalize().multiplyScalar(ninja.getValue(Ninja, 'speed') ?? 0);
+      }
+      // Two fixed-point passes on time-to-impact are plenty at these speeds.
+      this.intercept.copy(target.position);
+      for (let pass = 0; pass < 2; pass++) {
+        const flight = this.intercept.distanceTo(this.origin) / THROW_SPEED;
+        this.intercept.copy(target.position).addScaledVector(this.velocity, flight);
+        this.intercept.y += CHEST_HEIGHT;
+      }
+      this.intercept.sub(this.origin);
+      const distance = this.intercept.length();
+      const cos = this.intercept.dot(this.direction) / Math.max(distance, 1e-4);
+      if (cos > bestCos) {
+        bestCos = cos;
+        this.bestIntercept.copy(this.intercept).divideScalar(distance);
+        found = true;
+      }
+    }
+    if (found) this.direction.copy(this.bestIntercept);
   }
 
   private moveStar(star: Entity, delta: number): void {

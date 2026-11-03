@@ -1,9 +1,6 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
-import {
-  createNinja,
-  createPortal,
-  createShuriken,
-} from './scene-assets/ninja.scene-asset.js';
+import { createNinjaPose } from './scene-assets/ninja-model.js';
+import { createNinja, createShuriken } from './scene-assets/ninja.scene-asset.js';
 
 const publicAssetUrl = (filePath: string): string =>
   `${import.meta.env.BASE_URL}${filePath.replace(/^\/+/u, '')}`;
@@ -11,7 +8,9 @@ const publicAssetUrl = (filePath: string): string =>
 export default defineAssets({
   ninja: createNinja(),
   shuriken: createShuriken(),
-  portal: createPortal(),
+  'ninja-run-a': createNinjaPose('RunA'),
+  'ninja-run-b': createNinjaPose('RunB'),
+  'ninja-leap': createNinjaPose('Leap'),
   'hud-panel': {
     url: publicAssetUrl('ui/hud.uikitml'),
     type: AssetType.UIKitML,

@@ -1,35 +1,30 @@
 import { createComponent, Types } from '@iwsdk/core';
 
 export const NinjaPhase = {
-  Emerging: 'Emerging',
-  Crouching: 'Crouching',
+  Running: 'Running',
   Leaping: 'Leaping',
   Defeated: 'Defeated',
 } as const;
 
 /**
- * A shadow ninja that steps out of a wall portal, crouches, then leaps on an
- * arc toward the player. Positions are world space.
+ * A shadow ninja that sprints out of the fog along the floor, then leaps at
+ * the player once inside striking range. Positions are world space.
  */
 export const Ninja = createComponent('Ninja', {
-  phase: { type: Types.Enum, default: NinjaPhase.Emerging, enum: NinjaPhase },
+  phase: { type: Types.Enum, default: NinjaPhase.Running, enum: NinjaPhase },
   timer: { type: Types.Float32, default: 0 },
-  leapDuration: { type: Types.Float32, default: 2 },
-  arcHeight: { type: Types.Float32, default: 0.5 },
-  origin: { type: Types.Vec3, default: [0, 1.4, -3] },
-  normal: { type: Types.Vec3, default: [0, 0, 1] },
-  target: { type: Types.Vec3, default: [0, 1.2, -0.4] },
-  portal: { type: Types.Entity, default: null },
+  /** Ground speed while running, m/s. */
+  speed: { type: Types.Float32, default: 12 },
+  leapDuration: { type: Types.Float32, default: 0.6 },
+  arcHeight: { type: Types.Float32, default: 0.25 },
+  /** Leap start; written at takeoff. */
+  origin: { type: Types.Vec3, default: [0, 0.84, -3] },
+  /** Running: floor point to run at. Leaping: strike point in front of the face. */
+  target: { type: Types.Vec3, default: [0, 0.84, 0] },
 });
 
-/** A thrown star. Moves ballistically-straight and expires after `life`. */
+/** A thrown star. Moves in a straight line and expires after `life`. */
 export const Shuriken = createComponent('Shuriken', {
   velocity: { type: Types.Vec3, default: [0, 0, -10] },
   life: { type: Types.Float32, default: 1.5 },
-});
-
-/** Ink rift on a wall that opens before a ninja emerges and then closes. */
-export const Portal = createComponent('Portal', {
-  age: { type: Types.Float32, default: 0 },
-  duration: { type: Types.Float32, default: 1.4 },
 });

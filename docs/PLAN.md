@@ -8,9 +8,10 @@
 
 ## Pitch
 
-Shadow ninjas tear ink portals open in *your* walls and leap at you. Point a hand and pinch to throw
-shuriken before they land. One round takes 3–5 minutes, you play seated with no controllers, and the
-room you're sitting in is the level.
+The real wall in front of you dissolves into endless fog. Shadow ninjas sprint out of it from 30 m away,
+fast and low along your floor, and only leap when they're in striking range. Point a hand and pinch to
+throw shuriken before they land. One round takes 3–5 minutes, you play seated with no controllers, and
+the room you're sitting in is the level.
 
 ### Inspiration and IP boundary
 
@@ -28,11 +29,11 @@ original. Placeholder art in the repo is procedural.
 | Hands-first, required ("can you finish without a controller?") | Point and pinch throws along the hand's target ray. Menus use hand-ray pinch. Controllers work through the same select path but are optional. |
 | Seated (the "airplane seat test", 2 ft radius) | Ninjas come to you. The only body movement is aiming plus an optional small lean to dodge, because the strike point locks at takeoff. |
 | Easy in and out (≤10 min, clean pause and resume) | Instant Start, waves of about 30 s, a game-over in 3–5 min. The simulation pauses when the session is blurred (Quest menu). |
-| Passthrough must be purposeful | Spawn points come from **detected wall planes**, so a different room gives different spawn geometry. The fallback ring is used only when no walls are found. |
-| Holds up in untested rooms | Wall picking rejects small or low or high planes and walls outside the forward cone, then falls back cleanly. Test in 3+ real rooms. |
-| FoV-aware design | Spawns are limited to ±65° of the facing direction at round start. The HUD sits low in the view (about 20° down) at 1.1 m. The glasses-FoV check is a stretch goal. |
+| Passthrough must be purposeful | The fog breach is placed on the **detected wall you face**, sized to it and centered on you, and the ninjas run across your real floor. A free-standing breach is used only when no wall qualifies. |
+| Holds up in untested rooms | Breach picking rejects walls that are too narrow, too short, too close or too far, or more than 50° off your facing, then falls back cleanly. Test in 3+ real rooms. |
+| FoV-aware design | Ninjas only come from the breach, which must sit within 50° of where you face at round start. The HUD sits low in the view (about 20° down) at 1.1 m. The glasses-FoV check is a stretch goal. |
 | ≥60 fps on Quest hardware | Low-poly procedural meshes with shared materials, no shadows, no per-frame allocation, swept-sphere hit tests (no raycasters). Profile on **Quest 2** first. |
-| Innovation (25%) | Your real walls become the ninjas' doorways. A short "room scan → portals open" moment opens each session. |
+| Innovation (25%) | Your wall melts into fog at round start; ninjas materialize out of it at full sprint, like an anime cut-in. |
 | Polish (25%) | Art pass, spatial audio, hit-stop, a trailer under 3 minutes captured on device. |
 
 **Special prizes worth aiming at:** *Best First Five Minutes* (a wordless tutorial ninja that you must
@@ -43,19 +44,21 @@ types).
 
 The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Quest 3 profile, living-room environment):
 
-- `src/game-system.ts`: round loop (Menu → Waves → Intermission → GameOver), wall-plane spawn
-  selection with a fallback ring, HUD wiring, best score in `localStorage`.
-- `src/ninja-system.ts`: portal open and close, then emerge → crouch → arc leap → strike or defeat
-  animation.
-- `src/throw-system.ts`: pinch or trigger on either hand throws along that hand's ray. A click
-  throws in the 2D browser view. Swept hit tests.
-- `src/scene-assets/ninja.scene-asset.ts`: placeholder procedural ninja, shuriken and portal.
+- `src/game-system.ts`: round loop (Menu → Waves → Intermission → GameOver), fog-breach placement on
+  the faced wall with scene fog tuned to it, spawning deep in the fog, HUD wiring, best score.
+- `src/ninja-system.ts`: two-frame limited-animation sprint along the floor → attack leap inside
+  2.4 m → strike, plus the defeat tumble.
+- `src/throw-system.ts`: pinch or trigger on either hand throws along that hand's ray. An 8° aim
+  assist leads moving runners. A click throws in the 2D browser view. Swept hit tests.
+- `src/scene-assets/ninja-model.ts`: faceted low-poly ninja in three key frames (RunA, RunB, Leap),
+  one merged vertex-coloured mesh per frame.
+- `src/fog-breach.ts`: fog card on the wall plus floor mist; colours shared with scene fog.
 - `public/ui/hud.uikitml`: menu, HUD and game-over panel.
 - `.github/workflows/deploy.yml`: typecheck, build and deploy to GitHub Pages on push to `main`.
 
 Emulator checks that passed: the panel appears in front of the player on entering XR, pinching Begin
-starts wave 1, ninjas emerge from the room's detected front and side walls, leaps that land cost a life
-and end the game at 0, and a pinch throw aimed at a leaping ninja hits it (score 100).
+starts wave 1, the faced wall fades into fog, runners appear ~30 m back and sharpen as they approach,
+an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life.
 
 ## Milestones
 
@@ -63,8 +66,8 @@ and end the game at 0, and a pinch throw aimed at a leaping ninja hits it (score
 | --- | --- | --- |
 | Nov 2 | **M0 Bootstrap** ✅ | Slice runs in IWER; production build passes |
 | Nov 3 | **M1 Live on device** | Repo pushed, Pages live over HTTPS, slice playable on Quest 2 and Quest 3 with hands; first fps reading |
-| Nov 4–7 | **M2 Feel** | Aim assist (cone snap within ~6°), throw feedback (whoosh, trail, hit-stop, ink-burst particles), a ninja that "telegraphs" before leaping, dodge-by-lean readout, damage vignette, optional flick-to-throw gesture using hand velocity |
-| Nov 8–10 | **M3 Room as level** | Portal crack-open VFX anchored to wall planes, a "your walls are being scanned" intro, Space Setup prompt when no planes, floor and table planes for ground-runner ninjas, depth occlusion on Quest 3 (skill `iwsdk-depth-occlusion`) |
+| Nov 4–7 | **M2 Feel** | Throw feedback (whoosh, trail, hit-stop, ink-burst particles), a takeoff tell before the leap, dodge-by-lean readout, damage vignette, optional flick-to-throw gesture using hand velocity |
+| Nov 8–10 | **M3 Room as level** | Fog-breach polish (edge wisps, parallax depth layers, a crack/dissolve moment), Space Setup prompt when no wall qualifies, depth occlusion on Quest 3 (skill `iwsdk-depth-occlusion`), fill-rate check of the fog shader on Quest 2 |
 | Nov 11–13 | **M4 Content and retention** | 5-wave run with a final "shadow master" boss, combo multiplier, daily seeded run, local best and ranks, wordless first-time tutorial |
 | Nov 14–15 | **M5 Art and audio** | Final ninja model (`iwsdk-build-model`), stylized ink shader, original SFX and music (commissioned or self-made; licenses recorded) |
 | Nov 16 | **M6 Freeze** | Bug bash in 3+ rooms, Quest 2 at ≥72 fps target (60 fps minimum), cold start <5 s |
@@ -73,15 +76,18 @@ and end the game at 0, and a pinch throw aimed at a leaping ninja hits it (score
 
 ## Risks and mitigations
 
-- **Quest 2 performance:** it is the weakest target, so profile there first. Keep draw calls low (merge
-  ninja parts into one mesh for the final art) and cap concurrent ninjas at 5.
-- **No room setup:** without walls the game falls back to the ring. Show a one-line prompt to run Space
-  Setup, but never block play.
-- **Hand-ray jitter:** add aim assist and fire on the pinch *start* edge (already done). Consider
+- **Quest 2 performance:** it is the weakest target, so profile there first. Each ninja is one draw call
+  (~1k triangles per frame mesh); cap concurrent ninjas at 5. Watch fill rate on the full-wall fog shader.
+- **No room setup:** without a usable wall the breach stands free 3.5 m ahead. Show a one-line prompt
+  to run Space Setup, but never block play.
+- **No occlusion on Quest 2:** virtual content always draws over the real room, so runners must stay
+  inside the breach. Spawns sit in a corridor behind the opening, centered on the player, which keeps
+  them inside it from a seated viewpoint.
+- **Hand-ray jitter:** aim assist and firing on the pinch *start* edge are done. Consider
   stabilizing the ray with the wrist instead of the index.
 - **Pinch collisions:** a Start pinch could also throw a star, so there is a 0.4 s grace window (already done).
-- **Grayscale passthrough on Quest 2:** design for contrast. The red scarf and purple rim must read on
-  gray, so check silhouettes in grayscale.
+- **Grayscale passthrough on Quest 2:** the fog and pale ninjas are meant to blend at range, but runners
+  must read once inside the room; check that the violet sash and dark wraps carry them in grayscale.
 - **IP:** the name, art and audio are original. Do not reference SEGA or *Shinobi* in the store copy, title or
   assets; describe the inspiration generically.
 - **Eligibility:** the submitter must be a Meta VR Start member with a developer-enabled Meta account
