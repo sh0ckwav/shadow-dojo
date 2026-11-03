@@ -11,7 +11,9 @@ import { createShuriken } from './scene-assets/ninja.scene-asset.js';
 
 const THROW_SPEED = 11;
 const COOLDOWN = 0.18;
-const HIT_RADIUS = 0.32;
+const HIT_RADIUS = 0.36;
+/** Hit sphere center above the ninja's waist origin (chest height). */
+const CHEST_HEIGHT = 0.3;
 /** Ignore the pinch that pressed Start. */
 const START_GRACE = 0.4;
 const HANDS = ['left', 'right'] as const;
@@ -136,8 +138,8 @@ export class ThrowSystem extends createSystem({
       this.toNinja.subVectors(target.position, this.previous);
       const u = lengthSq > 0 ? Math.min(1, Math.max(0, this.toNinja.dot(this.segment) / lengthSq)) : 0;
       this.closest.copy(this.previous).addScaledVector(this.segment, u);
-      // Aim at the torso: the ninja origin is at the waist.
-      this.closest.y -= 0.15;
+      // Aim at the chest: the ninja origin is at the waist.
+      this.closest.y -= CHEST_HEIGHT;
       if (this.closest.distanceTo(target.position) < HIT_RADIUS) {
         ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
         ninja.setValue(Ninja, 'timer', 0);
