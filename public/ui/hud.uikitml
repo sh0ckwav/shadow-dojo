@@ -1,0 +1,71 @@
+<!--
+  Menu, HUD, and game-over panel. GameSystem repositions it in front of the
+  player and toggles elements by id.
+-->
+<style>
+  .panel-root {
+    flex-direction: column;
+    width: 360px;
+  }
+
+  .panel-content {
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 20px;
+    padding-right: 22px;
+    padding-bottom: 14px;
+    padding-left: 22px;
+  }
+
+  .title {
+    color: #fafaf7;
+    font-size: 30px;
+    font-weight: 700;
+  }
+
+  .status {
+    color: #dddfe3;
+    font-size: 18px;
+    line-height: 1.35;
+  }
+
+  .stats {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .stat {
+    color: #f5d90a;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .button {
+    justify-content: flex-start;
+    margin-left: 22px;
+    margin-right: 22px;
+    margin-bottom: 18px;
+  }
+</style>
+<Panel class="panel-root">
+  <div class="panel-content">
+    <div id="title" class="title">Shadow Dojo</div>
+    <div id="status" class="status">Ninjas will break through your walls.</div>
+    <div class="stats">
+      <div id="score" class="stat">Score 0</div>
+      <div id="lives" class="stat">Lives 3</div>
+    </div>
+  </div>
+  <Button id="xr-button" class="button">
+    <ButtonIcon>
+      <RectangleGoggles></RectangleGoggles>
+    </ButtonIcon>
+    <ButtonLabel>Enter passthrough</ButtonLabel>
+  </Button>
+  <Button id="start-button" class="button">
+    <ButtonIcon>
+      <Swords></Swords>
+    </ButtonIcon>
+    <ButtonLabel>Begin</ButtonLabel>
+  </Button>
+</Panel>
