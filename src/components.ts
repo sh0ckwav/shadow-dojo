@@ -1,4 +1,4 @@
 import { defineComponents } from '@iwsdk/core';
-import { Ninja, Portal, Shuriken } from './game-components.js';
+import { Ninja, Shuriken } from './game-components.js';
 
-export default defineComponents([Ninja, Shuriken, Portal]);
+export default defineComponents([Ninja, Shuriken]);

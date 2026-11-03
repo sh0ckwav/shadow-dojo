@@ -1,6 +1,6 @@
 import {
   createSystem,
-  Entity,
+  Fog,
   Matrix4,
   UIKit,
   UIKitMLAsset,
@@ -8,8 +8,10 @@ import {
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
-import { Ninja, NinjaPhase, Portal } from './game-components.js';
-import { createNinja, createPortal } from './scene-assets/ninja.scene-asset.js';
+import { FOG_COLOR, FogBreach } from './fog-breach.js';
+import { Ninja, NinjaPhase } from './game-components.js';
+import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
+import { createNinja } from './scene-assets/ninja.scene-asset.js';
 
 export const GamePhase = {
   Menu: 'Menu',
@@ -20,19 +22,27 @@ export const GamePhase = {
 export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase];
 
 const STARTING_LIVES = 3;
-/** Ninjas only spawn within this yaw of where the player faced at round start. */
-const SPAWN_HALF_ANGLE = (65 * Math.PI) / 180;
-const WALL_MARGIN = 0.35;
-const FALLBACK_RADIUS = 3;
 const BEST_SCORE_KEY = 'shadow-dojo.best';
+/** Walls further than this off the facing direction can't host the breach. */
+const BREACH_MAX_ANGLE = (50 * Math.PI) / 180;
+const BREACH_MAX_WIDTH = 3.2;
+const BREACH_MAX_HEIGHT = 2.6;
+/** Ninjas start this far behind the wall, beyond the fog's far distance. */
+const SPAWN_DEPTH_MIN = 26;
+const SPAWN_DEPTH_MAX = 32;
+/** Scene fog ramps from clear to solid across this span behind the wall. */
+const FOG_NEAR_PAST_WALL = 1;
+const FOG_FAR_PAST_WALL = 22;
+const FOG_FADE_SECONDS = 1.5;
 
 /** The WebXR plane object held by the XRPlane component. */
 type DetectedPlane = { orientation?: string; polygon: DOMPointReadOnly[] };
 
 /**
- * Owns the round loop: menu → waves → game over. Picks spawn points on real
- * walls from scene understanding, falling back to a virtual ring when the room
- * has no usable planes (emulator, unscanned room).
+ * Owns the round loop: menu → waves → game over. At round start the real wall
+ * the player faces (from scene understanding) dissolves into a fog breach;
+ * ninjas sprint out of it. Falls back to a free-standing breach when the room
+ * has no suitable wall.
  */
 export class GameSystem extends createSystem({
   planes: { required: [XRPlane] },
@@ -45,22 +55,24 @@ export class GameSystem extends createSystem({
   best = 0;
   /** Seconds since the current phase began; throws are ignored briefly after Start. */
   phaseTime = 0;
+  readonly breach = new FogBreach();
 
   private toSpawn = 0;
-  private panelPlacementDelay = -1;
   private spawnTimer = 0;
+  private panelPlacementDelay = -1;
+  private fogOpacity = 0;
+  private fog = new Fog(FOG_COLOR, 50, 80);
   private ninjaPrototype = createNinja();
-  private portalPrototype = createPortal();
 
   private head = new Vector3();
   private forward = new Vector3();
   private point = new Vector3();
   private normal = new Vector3();
-  private toPoint = new Vector3();
+  private tangent = new Vector3();
+  private planeOrigin = new Vector3();
   private planeMatrix = new Matrix4();
 
-  private panel?: UIKitMLAsset;
-  private panelEntity?: Entity;
+  private panelEntity?: ReturnType<GameSystem['world']['getSceneEntity']>;
   private titleText?: UIKit.Text;
   private statusText?: UIKit.Text;
   private scoreText?: UIKit.Text;
@@ -73,16 +85,18 @@ export class GameSystem extends createSystem({
     } catch {
       this.best = 0;
     }
+    this.world.createTransformEntity(this.breach.group);
+    this.breach.update(0, 0);
 
-    this.panel = this.world.getSceneObject<UIKitMLAsset>('hud-panel');
+    const panel = this.world.getSceneObject<UIKitMLAsset>('hud-panel');
     this.panelEntity = this.world.getSceneEntity('hud-panel');
-    if (this.panel != null) {
-      this.titleText = this.panel.getElementById<UIKit.Text>('title') ?? undefined;
-      this.statusText = this.panel.getElementById<UIKit.Text>('status') ?? undefined;
-      this.scoreText = this.panel.getElementById<UIKit.Text>('score') ?? undefined;
-      this.livesText = this.panel.getElementById<UIKit.Text>('lives') ?? undefined;
-      this.startButton = this.panel.getElementById('start-button') ?? undefined;
-      const xrButton = this.panel.getElementById('xr-button');
+    if (panel != null) {
+      this.titleText = panel.getElementById<UIKit.Text>('title') ?? undefined;
+      this.statusText = panel.getElementById<UIKit.Text>('status') ?? undefined;
+      this.scoreText = panel.getElementById<UIKit.Text>('score') ?? undefined;
+      this.livesText = panel.getElementById<UIKit.Text>('lives') ?? undefined;
+      this.startButton = panel.getElementById('start-button') ?? undefined;
+      const xrButton = panel.getElementById('xr-button');
       const onStart = () => this.startGame();
       const onEnterXR = () => this.world.launchXR();
       this.startButton?.addEventListener('click', onStart);
@@ -100,21 +114,26 @@ export class GameSystem extends createSystem({
         }),
       );
     }
+    this.cleanupFuncs.push(() => {
+      if (this.world.scene.fog === this.fog) this.world.scene.fog = null;
+    });
     this.showMenu();
   }
 
-  update(delta: number): void {
+  update(delta: number, time: number): void {
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) {
       return;
     }
     this.phaseTime += delta;
-    if (this.panelPlacementDelay >= 0) {
-      this.panelPlacementDelay -= delta;
-      if (this.panelPlacementDelay < 0) {
-        const inRound = this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission;
-        this.placePanel(inRound ? 1.1 : 0.85, inRound ? -0.42 : -0.12);
-      }
-    }
+    this.updatePanelPlacement(delta);
+
+    const fogTarget =
+      this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission ? 1 : 0;
+    const step = delta / FOG_FADE_SECONDS;
+    this.fogOpacity = fogTarget > this.fogOpacity
+      ? Math.min(fogTarget, this.fogOpacity + step)
+      : Math.max(fogTarget, this.fogOpacity - step);
+    this.breach.update(time, this.fogOpacity);
 
     if (this.phase === GamePhase.Intermission && this.phaseTime > 2.2) {
       this.beginWave(this.wave + 1);
@@ -127,7 +146,7 @@ export class GameSystem extends createSystem({
     if (this.toSpawn > 0 && this.spawnTimer <= 0 && alive < this.maxConcurrent()) {
       this.spawnNinja();
       this.toSpawn--;
-      this.spawnTimer = Math.max(0.55, 1.9 - this.wave * 0.15) * (0.7 + Math.random() * 0.6);
+      this.spawnTimer = Math.max(0.5, 1.6 - this.wave * 0.12) * (0.7 + Math.random() * 0.6);
     }
     if (this.toSpawn === 0 && alive === 0) {
       this.setPhase(GamePhase.Intermission);
@@ -135,10 +154,10 @@ export class GameSystem extends createSystem({
     }
   }
 
-  /** Called by ShurikenSystem. */
+  /** Called by ThrowSystem. */
   onNinjaDefeated(distanceToPlayer: number): void {
-    // Closer kills are riskier, so they pay a little more.
-    const bonus = distanceToPlayer < 1.2 ? 50 : 0;
+    // Picking one off while it's still deep in the fog pays extra.
+    const bonus = distanceToPlayer > 6 ? 50 : 0;
     this.score += 100 + bonus;
     this.refreshHud();
   }
@@ -151,9 +170,14 @@ export class GameSystem extends createSystem({
     if (this.lives <= 0) this.endGame();
   }
 
-  /** Leap duration in seconds for the current wave. */
+  /** Attack leap duration in seconds for the current wave. */
   leapDuration(): number {
-    return Math.max(1.15, 2.5 - this.wave * 0.13);
+    return Math.max(0.45, 0.75 - this.wave * 0.04);
+  }
+
+  /** Ground sprint speed in m/s for the current wave. */
+  runSpeed(): number {
+    return Math.min(18, 10 + this.wave * 1.3);
   }
 
   private maxConcurrent(): number {
@@ -166,9 +190,12 @@ export class GameSystem extends createSystem({
     }
     this.score = 0;
     this.lives = STARTING_LIVES;
+    this.openBreach();
     this.beginWave(1);
+    // Let the wall dissolve before the first runner appears.
+    this.spawnTimer = FOG_FADE_SECONDS + 0.5;
     // Park the HUD low in the view so it stays inside a narrow FoV and out of
-    // the ninjas' flight path.
+    // the ninjas' path.
     this.placePanel(1.1, -0.42);
     this.startButton?.setProperties({ display: 'none' });
     this.titleText?.setProperties({ display: 'none' });
@@ -205,7 +232,7 @@ export class GameSystem extends createSystem({
 
   private showMenu(): void {
     this.setPhase(GamePhase.Menu);
-    this.setStatus('Ninjas will break through your walls. Point and pinch to throw.');
+    this.setStatus('The wall in front of you will dissolve into fog. Point and pinch to throw.');
     this.refreshHud();
   }
 
@@ -223,14 +250,20 @@ export class GameSystem extends createSystem({
     this.livesText?.setProperties({ text: `Lives ${this.lives}` });
   }
 
+  private updatePanelPlacement(delta: number): void {
+    if (this.panelPlacementDelay < 0) return;
+    this.panelPlacementDelay -= delta;
+    if (this.panelPlacementDelay >= 0) return;
+    const inRound = this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission;
+    this.placePanel(inRound ? 1.1 : 0.85, inRound ? -0.42 : -0.12);
+  }
+
   /** Put the panel in front of the head, `down` meters below eye level, facing it. */
   private placePanel(distance: number, down: number): void {
     const object = this.panelEntity?.object3D;
     if (object == null) return;
     this.readHead();
-    object.position
-      .copy(this.head)
-      .addScaledVector(this.forward, distance);
+    object.position.copy(this.head).addScaledVector(this.forward, distance);
     object.position.y += down;
     object.lookAt(this.head);
   }
@@ -245,97 +278,98 @@ export class GameSystem extends createSystem({
     this.forward.normalize();
   }
 
-  private spawnNinja(): void {
+  /** Choose where the fog breaks through and set scene fog to match. */
+  private openBreach(): void {
     this.readHead();
-    if (!this.pickWallPoint()) this.pickFallbackPoint();
-
-    const portalObject = this.portalPrototype.clone();
-    portalObject.position.copy(this.point).addScaledVector(this.normal, 0.01);
-    this.toPoint.copy(portalObject.position).add(this.normal);
-    portalObject.lookAt(this.toPoint);
-    portalObject.scale.setScalar(0.01);
-    const portal = this.world.createTransformEntity(portalObject);
-    portal.addComponent(Portal, { age: 0, duration: 1.4 });
-
-    const ninjaObject = this.ninjaPrototype.clone();
-    ninjaObject.position.copy(this.point);
-    ninjaObject.scale.setScalar(0.2);
-    const ninja = this.world.createTransformEntity(ninjaObject);
-    ninja.addComponent(Ninja, {
-      phase: NinjaPhase.Emerging,
-      timer: 0,
-      leapDuration: this.leapDuration(),
-      arcHeight: 0.35 + Math.random() * 0.35,
-      portal,
-    });
-    ninja.getVectorView(Ninja, 'origin').set([this.point.x, this.point.y, this.point.z]);
-    ninja.getVectorView(Ninja, 'normal').set([this.normal.x, this.normal.y, this.normal.z]);
+    if (!this.placeBreachOnWall()) {
+      // No usable wall: a free-standing breach a few meters ahead.
+      this.point.copy(this.head).addScaledVector(this.forward, 3.5).setY(0);
+      this.normal.copy(this.forward).negate();
+      this.breach.place(this.point, this.normal, BREACH_MAX_WIDTH, BREACH_MAX_HEIGHT);
+    }
+    this.point.subVectors(this.head, this.breach.center);
+    const wallDistance = Math.max(0.5, this.point.dot(this.breach.normal));
+    this.fog.near = wallDistance + FOG_NEAR_PAST_WALL;
+    this.fog.far = wallDistance + FOG_FAR_PAST_WALL;
+    this.world.scene.fog = this.fog;
   }
 
-  /** Random point on a detected wall inside the forward spawn cone. */
-  private pickWallPoint(): boolean {
-    const walls: Entity[] = [];
+  /** Pick the detected wall most squarely in front of the player. */
+  private placeBreachOnWall(): boolean {
+    let bestScore = Math.cos(BREACH_MAX_ANGLE);
+    let found = false;
     for (const entity of this.queries.planes.entities) {
       const plane = entity.getValue(XRPlane, '_plane') as DetectedPlane | undefined;
-      if (plane?.orientation === 'vertical' && entity.object3D != null) {
-        walls.push(entity);
-      }
-    }
-    if (walls.length === 0) return false;
+      const object = entity.object3D;
+      if (plane?.orientation !== 'vertical' || object == null) continue;
 
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const entity = walls[Math.floor(Math.random() * walls.length)];
-      const plane = entity.getValue(XRPlane, '_plane') as DetectedPlane;
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minZ = Infinity;
-      let maxZ = -Infinity;
+      object.updateWorldMatrix(true, false);
+      this.planeMatrix.copy(object.matrixWorld);
+      this.planeOrigin.setFromMatrixPosition(this.planeMatrix);
+      // WebXR planes use local +Y as the surface normal; face it into the room.
+      this.normal.setFromMatrixColumn(this.planeMatrix, 1).setY(0).normalize();
+      this.point.subVectors(this.head, this.planeOrigin);
+      let distance = this.point.dot(this.normal);
+      if (distance < 0) {
+        this.normal.negate();
+        distance = -distance;
+      }
+      if (distance < 1 || distance > 8) continue;
+      const facing = -this.normal.dot(this.forward);
+      if (facing < bestScore) continue;
+
+      // Extent of the wall along its horizontal tangent and in height.
+      this.tangent.set(this.normal.z, 0, -this.normal.x);
+      let aMin = Infinity;
+      let aMax = -Infinity;
+      let yMax = -Infinity;
       for (const p of plane.polygon) {
-        minX = Math.min(minX, p.x);
-        maxX = Math.max(maxX, p.x);
-        minZ = Math.min(minZ, p.z);
-        maxZ = Math.max(maxZ, p.z);
+        this.point.set(p.x, p.y, p.z).applyMatrix4(this.planeMatrix);
+        yMax = Math.max(yMax, this.point.y);
+        this.point.sub(this.planeOrigin);
+        const along = this.point.dot(this.tangent);
+        aMin = Math.min(aMin, along);
+        aMax = Math.max(aMax, along);
       }
-      if (maxX - minX < WALL_MARGIN * 2 || maxZ - minZ < WALL_MARGIN * 2) continue;
+      const width = Math.min(BREACH_MAX_WIDTH, aMax - aMin - 0.2);
+      const height = Math.min(BREACH_MAX_HEIGHT, yMax);
+      if (width < 1.4 || height < 1.8) continue;
 
-      entity.object3D!.updateWorldMatrix(true, false);
-      this.planeMatrix.copy(entity.object3D!.matrixWorld);
-      const x = minX + WALL_MARGIN + Math.random() * (maxX - minX - WALL_MARGIN * 2);
-      const z = minZ + WALL_MARGIN + Math.random() * (maxZ - minZ - WALL_MARGIN * 2);
-      this.point.set(x, 0, z).applyMatrix4(this.planeMatrix);
-      // WebXR planes use local +Y as the surface normal.
-      this.normal.setFromMatrixColumn(this.planeMatrix, 1).normalize();
-
-      // Keep emergence near eye height so leaps read clearly.
-      if (this.point.y < this.head.y - 0.6 || this.point.y > this.head.y + 0.7) continue;
-
-      this.toPoint.copy(this.point).sub(this.head);
-      this.toPoint.y = 0;
-      const distance = this.toPoint.length();
-      if (distance < 1.2) continue;
-      this.toPoint.divideScalar(distance);
-      if (Math.acos(Math.min(1, this.toPoint.dot(this.forward))) > SPAWN_HALF_ANGLE) {
-        continue;
-      }
-      // The normal must face into the room, toward the player.
-      if (this.normal.dot(this.toPoint) > 0) this.normal.negate();
-      return true;
+      // Center on the point of the wall straight ahead of the player.
+      this.point.subVectors(this.head, this.planeOrigin);
+      const headAlong = this.point.dot(this.tangent);
+      const along = Math.min(aMax - width / 2, Math.max(aMin + width / 2, headAlong));
+      this.point.copy(this.planeOrigin).addScaledVector(this.tangent, along).setY(0);
+      this.breach.place(this.point, this.normal, width, height);
+      bestScore = facing;
+      found = true;
     }
-    return false;
+    return found;
   }
 
-  private pickFallbackPoint(): void {
-    const yaw = (Math.random() * 2 - 1) * SPAWN_HALF_ANGLE * 0.8;
-    const cos = Math.cos(yaw);
-    const sin = Math.sin(yaw);
-    // Rotate forward around +Y by yaw.
-    const dx = this.forward.x * cos + this.forward.z * sin;
-    const dz = -this.forward.x * sin + this.forward.z * cos;
-    this.point.set(
-      this.head.x + dx * FALLBACK_RADIUS,
-      this.head.y + (Math.random() - 0.4) * 0.6,
-      this.head.z + dz * FALLBACK_RADIUS,
-    );
-    this.normal.set(-dx, 0, -dz);
+  /** Start a runner deep in the fog corridor behind the breach. */
+  private spawnNinja(): void {
+    this.readHead();
+    const breach = this.breach;
+    const depth = SPAWN_DEPTH_MIN + Math.random() * (SPAWN_DEPTH_MAX - SPAWN_DEPTH_MIN);
+    const lateral = (Math.random() * 2 - 1) * breach.width * 0.3;
+    this.point
+      .copy(breach.center)
+      .addScaledVector(breach.normal, -depth)
+      .addScaledVector(breach.tangent, lateral)
+      .setY(RUN_WAIST_HEIGHT);
+
+    const object = this.ninjaPrototype.clone();
+    object.position.copy(this.point);
+    const ninja = this.world.createTransformEntity(object);
+    ninja.addComponent(Ninja, {
+      phase: NinjaPhase.Running,
+      timer: Math.random(),
+      speed: this.runSpeed() * (0.9 + Math.random() * 0.2),
+      leapDuration: this.leapDuration(),
+      arcHeight: 0.15 + Math.random() * 0.2,
+    });
+    // Run at the spot on the floor beneath the player's head.
+    ninja.getVectorView(Ninja, 'target').set([this.head.x, RUN_WAIST_HEIGHT, this.head.z]);
   }
 }

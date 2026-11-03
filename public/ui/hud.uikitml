@@ -50,7 +50,7 @@
 <Panel class="panel-root">
   <div class="panel-content">
     <div id="title" class="title">Shadow Dojo</div>
-    <div id="status" class="status">Ninjas will break through your walls.</div>
+    <div id="status" class="status">The wall in front of you will dissolve into fog.</div>
     <div class="stats">
       <div id="score" class="stat">Score 0</div>
       <div id="lives" class="stat">Lives 3</div>

@@ -1,13 +1,9 @@
 import {
-  CircleGeometry,
-  DoubleSide,
   ExtrudeGeometry,
   Group,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   Shape,
-  TorusGeometry,
 } from '@iwsdk/core';
 import { createNinjaModel } from './ninja-model.js';
 
@@ -16,8 +12,6 @@ const steel = new MeshStandardMaterial({
   metalness: 0.9,
   roughness: 0.25,
 });
-const ink = new MeshBasicMaterial({ color: 0x050308, side: DoubleSide });
-const inkRim = new MeshBasicMaterial({ color: 0x7a1fd1 });
 
 /** Faceted leaping ninja; origin at the waist, facing +Z. */
 export function createNinja(): Group {
@@ -47,18 +41,4 @@ export function createShuriken(): Mesh {
   const mesh = new Mesh(geometry, steel);
   mesh.name = 'Shuriken';
   return mesh;
-}
-
-/** Ink rift that faces +Z; place it on a wall with +Z along the wall normal. */
-export function createPortal(): Group {
-  const root = new Group();
-  root.name = 'Portal';
-  const hole = new Mesh(new CircleGeometry(0.42, 28), ink);
-  hole.scale.y = 1.5;
-  root.add(hole);
-  const rim = new Mesh(new TorusGeometry(0.42, 0.02, 6, 28), inkRim);
-  rim.scale.y = 1.5;
-  rim.position.z = 0.002;
-  root.add(rim);
-  return root;
 }

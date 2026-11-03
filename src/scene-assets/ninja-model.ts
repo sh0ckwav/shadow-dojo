@@ -1,22 +1,20 @@
 import {
-  BackSide,
   Color,
   Group,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   Vector3,
 } from '@iwsdk/core';
 import { bevelBox, orientBasis } from './lib/hardsurface.js';
-import { outlineShell, PartList } from './lib/low-poly.js';
+import { PartList } from './lib/low-poly.js';
 
 // Faceted, flat-shaded figure in the spirit of early-90s 3D fighters and
 // faceted public sculpture: few sides per form, colour carried per vertex so
-// the whole body is one draw call plus one outline shell.
+// each key frame is one draw call. No outline: the pale gi is meant to melt
+// into the fog the ninjas run out of.
 //
-// Origin: waist. Forward: +Z (toward the player). Lunging leap pose, about
-// 1.4 m tall from back foot to hood.
+// Origin: waist. Forward: +Z (toward the player).
 
 const GI = new Color(0xa3b2a6);
 const GI_SHADE = new Color(0x84938a);
@@ -32,8 +30,6 @@ const bodyMaterial = new MeshStandardMaterial({
   roughness: 0.82,
   metalness: 0.05,
 });
-// Dark rim keeps the pale figure readable on Quest 2's grayscale passthrough.
-const outlineMaterial = new MeshBasicMaterial({ color: 0x0b0b10, side: BackSide });
 
 const j = (x: number, y: number, z: number) => new Vector3(x, y, z);
 const UP = j(0, 1, 0);
@@ -48,15 +44,16 @@ function boxAt(parts: PartList, w: number, h: number, d: number, center: Vector3
   parts.add(bevelBox(w, h, d, 0.004, 0, 1), color, orienter.matrix);
 }
 
-function addTorso(parts: PartList): void {
+function addTorso(parts: PartList, lean: number): void {
+  // Rings shear forward with height: `lean` is forward meters per meter up.
   parts.column(
     [
       { y: -0.1, w: 0.15, d: 0.11, z: -0.02 },
       { y: 0.02, w: 0.16, d: 0.115, z: 0 },
-      { y: 0.16, w: 0.15, d: 0.105, z: 0.04 },
-      { y: 0.34, w: 0.19, d: 0.12, z: 0.09 },
-      { y: 0.46, w: 0.2, d: 0.1, z: 0.13 },
-      { y: 0.52, w: 0.07, d: 0.065, z: 0.15 },
+      { y: 0.16, w: 0.15, d: 0.105, z: 0.16 * lean },
+      { y: 0.34, w: 0.19, d: 0.12, z: 0.34 * lean },
+      { y: 0.46, w: 0.2, d: 0.1, z: 0.46 * lean + 0.01 },
+      { y: 0.52, w: 0.07, d: 0.065, z: 0.52 * lean + 0.01 },
     ],
     GI,
     8,
@@ -65,36 +62,37 @@ function addTorso(parts: PartList): void {
   parts.column(
     [
       { y: -0.02, w: 0.168, d: 0.123, z: 0 },
-      { y: 0.07, w: 0.163, d: 0.118, z: 0.01 },
+      { y: 0.07, w: 0.163, d: 0.118, z: 0.07 * lean },
     ],
     SASH,
     8,
   );
   parts.limb(j(-0.06, 0.02, 0.12), j(-0.1, -0.16, 0.13), 0.022, 0.012, SASH, 4);
   // Crossed gi lapels read as a darker V on the chest.
-  parts.limb(j(-0.09, 0.44, 0.22), j(0.05, 0.12, 0.15), 0.018, 0.018, GI_SHADE, 4);
-  parts.limb(j(0.09, 0.44, 0.22), j(-0.02, 0.2, 0.17), 0.018, 0.018, GI_SHADE, 4);
+  parts.limb(j(-0.09, 0.44, 0.44 * lean + 0.11), j(0.05, 0.12, 0.12 * lean + 0.1), 0.018, 0.018, GI_SHADE, 4);
+  parts.limb(j(0.09, 0.44, 0.44 * lean + 0.11), j(-0.02, 0.2, 0.2 * lean + 0.105), 0.018, 0.018, GI_SHADE, 4);
 }
 
-function addHood(parts: PartList): void {
-  // Full hood: a faceted egg leaning forward with the neck.
+function addHood(parts: PartList, lean: number): void {
+  // Full hood: a faceted egg carried upright on the leaning neck.
+  const z = 0.52 * lean + 0.02;
   parts.column(
     [
-      { y: 0.52, w: 0.075, d: 0.075, z: 0.16 },
-      { y: 0.6, w: 0.1, d: 0.105, z: 0.18 },
-      { y: 0.69, w: 0.108, d: 0.112, z: 0.19 },
-      { y: 0.77, w: 0.095, d: 0.1, z: 0.19 },
-      { y: 0.83, w: 0.045, d: 0.05, z: 0.18 },
+      { y: 0.52, w: 0.075, d: 0.075, z },
+      { y: 0.6, w: 0.1, d: 0.105, z: z + 0.02 },
+      { y: 0.69, w: 0.108, d: 0.112, z: z + 0.03 },
+      { y: 0.77, w: 0.095, d: 0.1, z: z + 0.03 },
+      { y: 0.83, w: 0.045, d: 0.05, z: z + 0.02 },
     ],
     GI,
     8,
   );
   // Mask band across the eyes, sitting proud of the hood's front facets.
-  boxAt(parts, 0.19, 0.045, 0.06, j(0, 0.705, 0.26), j(1, 0, 0), UP, MASK);
-  boxAt(parts, 0.045, 0.014, 0.01, j(-0.042, 0.708, 0.292), j(1, 0, 0), UP, EYES);
-  boxAt(parts, 0.045, 0.014, 0.01, j(0.042, 0.708, 0.292), j(1, 0, 0), UP, EYES);
+  boxAt(parts, 0.19, 0.045, 0.06, j(0, 0.705, z + 0.1), j(1, 0, 0), UP, MASK);
+  boxAt(parts, 0.045, 0.014, 0.01, j(-0.042, 0.708, z + 0.132), j(1, 0, 0), UP, EYES);
+  boxAt(parts, 0.045, 0.014, 0.01, j(0.042, 0.708, z + 0.132), j(1, 0, 0), UP, EYES);
   // Hood tail falling down the back of the neck.
-  parts.limb(j(0, 0.74, 0.1), j(0, 0.5, 0.02), 0.03, 0.012, GI_SHADE, 4);
+  parts.limb(j(0, 0.74, z - 0.06), j(0, 0.5, z - 0.12), 0.03, 0.012, GI_SHADE, 4);
 }
 
 /** Clawed hand: palm down, fingers curling toward the target. */
@@ -144,27 +142,89 @@ function addLeg(parts: PartList, hip: Vector3, knee: Vector3, ankle: Vector3, to
   boxAt(parts, 0.085, 0.07, 0.2, ankle.clone().lerp(toe, 0.5), footSide, footUp, WRAP);
 }
 
-/** Leaping ninja: one hand raised to strike, the other reaching for you. */
-export function createNinjaModel(): Group {
-  const parts = new PartList();
-  addTorso(parts);
-  addHood(parts);
-  // Right arm (−X from the player's view is the ninja's right) raised high.
-  addArm(parts, j(-0.2, 0.44, 0.12), j(-0.32, 0.6, 0.3), j(-0.24, 0.8, 0.52), 1);
-  // Left arm thrust straight at the player.
-  addArm(parts, j(0.2, 0.44, 0.12), j(0.29, 0.36, 0.36), j(0.2, 0.42, 0.62), -1);
-  // Lead knee tucked up and forward, trailing leg extended back.
-  addLeg(parts, j(-0.09, -0.08, 0.02), j(-0.15, -0.2, 0.32), j(-0.13, -0.56, 0.3), j(-0.13, -0.6, 0.48));
-  addLeg(parts, j(0.09, -0.08, -0.02), j(0.14, -0.42, -0.14), j(0.16, -0.66, -0.4), j(0.16, -0.78, -0.56));
+type Arm = [shoulder: Vector3, elbow: Vector3, wrist: Vector3];
+type Leg = [hip: Vector3, knee: Vector3, ankle: Vector3, toe: Vector3];
 
-  const geometry = parts.merge();
+/** One key pose. Right is the ninja's right (−X when it faces +Z). */
+interface Pose {
+  lean: number;
+  rightArm: Arm;
+  leftArm: Arm;
+  rightLeg: Leg;
+  leftLeg: Leg;
+}
+
+/** Height of the waist origin above the floor in both running frames. */
+export const RUN_WAIST_HEIGHT = 0.84;
+
+const mirrorLeg = (leg: Leg): Leg => leg.map((p) => j(-p.x, p.y, p.z)) as Leg;
+
+// Ninja run: torso pitched forward, both arms swept straight back.
+const strideForward: Leg = [j(0.09, -0.08, 0), j(0.12, -0.26, 0.34), j(0.12, -0.66, 0.3), j(0.12, -0.74, 0.46)];
+const strideBack: Leg = [j(-0.09, -0.08, -0.02), j(-0.12, -0.46, -0.2), j(-0.13, -0.62, -0.56), j(-0.13, -0.8, -0.62)];
+
+const POSES = {
+  RunA: {
+    lean: 0.7,
+    rightArm: [j(-0.2, 0.44, 0.32), j(-0.27, 0.3, 0.08), j(-0.27, 0.34, -0.2)],
+    leftArm: [j(0.2, 0.44, 0.32), j(0.27, 0.32, 0.06), j(0.26, 0.38, -0.22)],
+    leftLeg: strideForward,
+    rightLeg: strideBack,
+  },
+  RunB: {
+    lean: 0.7,
+    rightArm: [j(-0.2, 0.44, 0.32), j(-0.28, 0.33, 0.1), j(-0.28, 0.4, -0.18)],
+    leftArm: [j(0.2, 0.44, 0.32), j(0.28, 0.33, 0.1), j(0.28, 0.4, -0.18)],
+    leftLeg: mirrorLeg(strideBack),
+    rightLeg: mirrorLeg(strideForward),
+  },
+  // Attack leap: one clawed hand raised to strike, the other thrust forward.
+  Leap: {
+    lean: 0.27,
+    rightArm: [j(-0.2, 0.44, 0.12), j(-0.32, 0.6, 0.3), j(-0.24, 0.8, 0.52)],
+    leftArm: [j(0.2, 0.44, 0.12), j(0.29, 0.36, 0.36), j(0.2, 0.42, 0.62)],
+    rightLeg: [j(-0.09, -0.08, 0.02), j(-0.15, -0.2, 0.32), j(-0.13, -0.56, 0.3), j(-0.13, -0.6, 0.48)],
+    leftLeg: [j(0.09, -0.08, -0.02), j(0.14, -0.42, -0.14), j(0.16, -0.66, -0.4), j(0.16, -0.78, -0.56)],
+  },
+} satisfies Record<string, Pose>;
+
+export type NinjaPose = keyof typeof POSES;
+/** Child order inside the ninja root, used by NinjaSystem to flip frames. */
+export const NINJA_FRAMES: NinjaPose[] = ['RunA', 'RunB', 'Leap'];
+
+function buildPose(name: NinjaPose): Mesh {
+  const pose: Pose = POSES[name];
+  const parts = new PartList();
+  addTorso(parts, pose.lean);
+  addHood(parts, pose.lean);
+  addArm(parts, ...pose.rightArm, 1);
+  addArm(parts, ...pose.leftArm, -1);
+  addLeg(parts, ...pose.rightLeg);
+  addLeg(parts, ...pose.leftLeg);
+  const mesh = new Mesh(parts.merge(), bodyMaterial);
+  mesh.name = name;
+  return mesh;
+}
+
+/** A single pose, for previewing frames in the editor. */
+export function createNinjaPose(name: NinjaPose): Group {
+  const root = new Group();
+  root.name = `Ninja${name}`;
+  root.add(buildPose(name));
+  return root;
+}
+
+/**
+ * Limited-animation ninja: one mesh per key frame, only one visible at a
+ * time. Origin at the waist, facing +Z.
+ */
+export function createNinjaModel(): Group {
   const root = new Group();
   root.name = 'Ninja';
-  const body = new Mesh(geometry, bodyMaterial);
-  body.name = 'Body';
-  root.add(body);
-  const outline = new Mesh(outlineShell(geometry, 0.008), outlineMaterial);
-  outline.name = 'Outline';
-  root.add(outline);
+  for (const name of NINJA_FRAMES) {
+    const frame = buildPose(name);
+    frame.visible = name === 'RunA';
+    root.add(frame);
+  }
   return root;
 }
