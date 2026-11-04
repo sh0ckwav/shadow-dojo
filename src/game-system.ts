@@ -1,6 +1,5 @@
 import {
   createSystem,
-  Fog,
   Matrix4,
   UIKit,
   UIKitMLAsset,
@@ -8,7 +7,7 @@ import {
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
-import { FOG_COLOR, FogBreach } from './fog-breach.js';
+import { InkEnvironment } from './ink-environment.js';
 import { Ninja, NinjaPhase } from './game-components.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
@@ -23,26 +22,24 @@ export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase];
 
 const STARTING_LIVES = 3;
 const BEST_SCORE_KEY = 'shadow-dojo.best';
-/** Walls further than this off the facing direction can't host the breach. */
-const BREACH_MAX_ANGLE = (50 * Math.PI) / 180;
-const BREACH_MAX_WIDTH = 3.2;
-const BREACH_MAX_HEIGHT = 2.6;
-/** Ninjas start this far behind the wall, beyond the fog's far distance. */
-const SPAWN_DEPTH_MIN = 26;
-const SPAWN_DEPTH_MAX = 32;
-/** Scene fog ramps from clear to solid across this span behind the wall. */
-const FOG_NEAR_PAST_WALL = 1;
-const FOG_FAR_PAST_WALL = 22;
-const FOG_FADE_SECONDS = 1.5;
+/** Walls further than this off the facing direction don't count as the front wall. */
+const FRONT_WALL_MAX_ANGLE = (50 * Math.PI) / 180;
+/** Where the painted ground starts when no front wall is detected. */
+const DEFAULT_NEAR = 2.6;
+/** Runners start this far out, deep in the painting's mist. */
+const SPAWN_RADIUS_MIN = 58;
+const SPAWN_RADIUS_MAX = 64;
+/** Runners come from within this angle of the panorama's center. */
+const SPAWN_HALF_ANGLE = (35 * Math.PI) / 180;
+const REVEAL_SECONDS = 2;
 
 /** The WebXR plane object held by the XRPlane component. */
 type DetectedPlane = { orientation?: string; polygon: DOMPointReadOnly[] };
 
 /**
- * Owns the round loop: menu → waves → game over. At round start the real wall
- * the player faces (from scene understanding) dissolves into a fog breach;
- * ninjas sprint out of it. Falls back to a free-standing breach when the room
- * has no suitable wall.
+ * Owns the round loop: menu → waves → game over. At round start a 180° ink
+ * painting fades in ahead of the player, its ground beginning at the real
+ * front wall found by scene understanding; ninjas sprint out of its mist.
  */
 export class GameSystem extends createSystem({
   planes: { required: [XRPlane] },
@@ -55,20 +52,18 @@ export class GameSystem extends createSystem({
   best = 0;
   /** Seconds since the current phase began; throws are ignored briefly after Start. */
   phaseTime = 0;
-  readonly breach = new FogBreach();
+  readonly environment = new InkEnvironment();
 
   private toSpawn = 0;
   private spawnTimer = 0;
   private panelPlacementDelay = -1;
-  private fogOpacity = 0;
-  private fog = new Fog(FOG_COLOR, 50, 80);
+  private reveal = 0;
   private ninjaPrototype = createNinja();
 
   private head = new Vector3();
   private forward = new Vector3();
   private point = new Vector3();
   private normal = new Vector3();
-  private tangent = new Vector3();
   private planeOrigin = new Vector3();
   private planeMatrix = new Matrix4();
 
@@ -85,8 +80,8 @@ export class GameSystem extends createSystem({
     } catch {
       this.best = 0;
     }
-    this.world.createTransformEntity(this.breach.group);
-    this.breach.update(0, 0);
+    this.world.createTransformEntity(this.environment.group);
+    this.environment.update(0);
 
     const panel = this.world.getSceneObject<UIKitMLAsset>('hud-panel');
     this.panelEntity = this.world.getSceneEntity('hud-panel');
@@ -115,25 +110,25 @@ export class GameSystem extends createSystem({
       );
     }
     this.cleanupFuncs.push(() => {
-      if (this.world.scene.fog === this.fog) this.world.scene.fog = null;
+      if (this.world.scene.fog === this.environment.fog) this.world.scene.fog = null;
     });
     this.showMenu();
   }
 
-  update(delta: number, time: number): void {
+  update(delta: number): void {
     if (this.world.visibilityState.peek() === VisibilityState.VisibleBlurred) {
       return;
     }
     this.phaseTime += delta;
     this.updatePanelPlacement(delta);
 
-    const fogTarget =
+    const revealTarget =
       this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission ? 1 : 0;
-    const step = delta / FOG_FADE_SECONDS;
-    this.fogOpacity = fogTarget > this.fogOpacity
-      ? Math.min(fogTarget, this.fogOpacity + step)
-      : Math.max(fogTarget, this.fogOpacity - step);
-    this.breach.update(time, this.fogOpacity);
+    const step = delta / REVEAL_SECONDS;
+    this.reveal = revealTarget > this.reveal
+      ? Math.min(revealTarget, this.reveal + step)
+      : Math.max(revealTarget, this.reveal - step);
+    this.environment.update(this.reveal);
 
     if (this.phase === GamePhase.Intermission && this.phaseTime > 2.2) {
       this.beginWave(this.wave + 1);
@@ -156,7 +151,7 @@ export class GameSystem extends createSystem({
 
   /** Called by ThrowSystem. */
   onNinjaDefeated(distanceToPlayer: number): void {
-    // Picking one off while it's still deep in the fog pays extra.
+    // Picking one off while it's still deep in the mist pays extra.
     const bonus = distanceToPlayer > 6 ? 50 : 0;
     this.score += 100 + bonus;
     this.refreshHud();
@@ -177,7 +172,7 @@ export class GameSystem extends createSystem({
 
   /** Ground sprint speed in m/s for the current wave. */
   runSpeed(): number {
-    return Math.min(18, 10 + this.wave * 1.3);
+    return Math.min(22, 14 + this.wave * 1.5);
   }
 
   private maxConcurrent(): number {
@@ -190,10 +185,10 @@ export class GameSystem extends createSystem({
     }
     this.score = 0;
     this.lives = STARTING_LIVES;
-    this.openBreach();
+    this.openEnvironment();
     this.beginWave(1);
-    // Let the wall dissolve before the first runner appears.
-    this.spawnTimer = FOG_FADE_SECONDS + 0.5;
+    // Let the painting fade in before the first runner appears.
+    this.spawnTimer = REVEAL_SECONDS + 0.5;
     // Park the HUD low in the view so it stays inside a narrow FoV and out of
     // the ninjas' path.
     this.placePanel(1.1, -0.42);
@@ -232,7 +227,7 @@ export class GameSystem extends createSystem({
 
   private showMenu(): void {
     this.setPhase(GamePhase.Menu);
-    this.setStatus('The wall in front of you will dissolve into fog. Point and pinch to throw.');
+    this.setStatus('Shadows gather in the bamboo ahead. Point and pinch to throw.');
     this.refreshHud();
   }
 
@@ -278,26 +273,22 @@ export class GameSystem extends createSystem({
     this.forward.normalize();
   }
 
-  /** Choose where the fog breaks through and set scene fog to match. */
-  private openBreach(): void {
+  /** Paint the half-world in front of the player and switch on its mist. */
+  private openEnvironment(): void {
     this.readHead();
-    if (!this.placeBreachOnWall()) {
-      // No usable wall: a free-standing breach a few meters ahead.
-      this.point.copy(this.head).addScaledVector(this.forward, 3.5).setY(0);
-      this.normal.copy(this.forward).negate();
-      this.breach.place(this.point, this.normal, BREACH_MAX_WIDTH, BREACH_MAX_HEIGHT);
-    }
-    this.point.subVectors(this.head, this.breach.center);
-    const wallDistance = Math.max(0.5, this.point.dot(this.breach.normal));
-    this.fog.near = wallDistance + FOG_NEAR_PAST_WALL;
-    this.fog.far = wallDistance + FOG_FAR_PAST_WALL;
-    this.world.scene.fog = this.fog;
+    const wall = this.frontWallDistance();
+    const near = wall > 0 ? Math.min(5, Math.max(1.8, wall)) : DEFAULT_NEAR;
+    this.environment.place(this.head, this.forward, near);
+    this.world.scene.fog = this.environment.fog;
   }
 
-  /** Pick the detected wall most squarely in front of the player. */
-  private placeBreachOnWall(): boolean {
-    let bestScore = Math.cos(BREACH_MAX_ANGLE);
-    let found = false;
+  /**
+   * Distance straight ahead to the detected wall most squarely in front of
+   * the player, or -1 when none qualifies.
+   */
+  private frontWallDistance(): number {
+    let bestFacing = Math.cos(FRONT_WALL_MAX_ANGLE);
+    let best = -1;
     for (const entity of this.queries.planes.entities) {
       const plane = entity.getValue(XRPlane, '_plane') as DetectedPlane | undefined;
       const object = entity.object3D;
@@ -314,50 +305,21 @@ export class GameSystem extends createSystem({
         this.normal.negate();
         distance = -distance;
       }
-      if (distance < 1 || distance > 8) continue;
       const facing = -this.normal.dot(this.forward);
-      if (facing < bestScore) continue;
-
-      // Extent of the wall along its horizontal tangent and in height.
-      this.tangent.set(this.normal.z, 0, -this.normal.x);
-      let aMin = Infinity;
-      let aMax = -Infinity;
-      let yMax = -Infinity;
-      for (const p of plane.polygon) {
-        this.point.set(p.x, p.y, p.z).applyMatrix4(this.planeMatrix);
-        yMax = Math.max(yMax, this.point.y);
-        this.point.sub(this.planeOrigin);
-        const along = this.point.dot(this.tangent);
-        aMin = Math.min(aMin, along);
-        aMax = Math.max(aMax, along);
-      }
-      const width = Math.min(BREACH_MAX_WIDTH, aMax - aMin - 0.2);
-      const height = Math.min(BREACH_MAX_HEIGHT, yMax);
-      if (width < 1.4 || height < 1.8) continue;
-
-      // Center on the point of the wall straight ahead of the player.
-      this.point.subVectors(this.head, this.planeOrigin);
-      const headAlong = this.point.dot(this.tangent);
-      const along = Math.min(aMax - width / 2, Math.max(aMin + width / 2, headAlong));
-      this.point.copy(this.planeOrigin).addScaledVector(this.tangent, along).setY(0);
-      this.breach.place(this.point, this.normal, width, height);
-      bestScore = facing;
-      found = true;
+      if (distance < 1 || distance > 8 || facing < bestFacing) continue;
+      bestFacing = facing;
+      // Distance along the gaze line, not the perpendicular.
+      best = distance / facing;
     }
-    return found;
+    return best;
   }
 
-  /** Start a runner deep in the fog corridor behind the breach. */
+  /** Start a runner deep in the painting's mist. */
   private spawnNinja(): void {
     this.readHead();
-    const breach = this.breach;
-    const depth = SPAWN_DEPTH_MIN + Math.random() * (SPAWN_DEPTH_MAX - SPAWN_DEPTH_MIN);
-    const lateral = (Math.random() * 2 - 1) * breach.width * 0.3;
-    this.point
-      .copy(breach.center)
-      .addScaledVector(breach.normal, -depth)
-      .addScaledVector(breach.tangent, lateral)
-      .setY(RUN_WAIST_HEIGHT);
+    const azimuth = (Math.random() * 2 - 1) * SPAWN_HALF_ANGLE;
+    const radius = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
+    this.environment.pointAt(azimuth, radius, this.point).setY(RUN_WAIST_HEIGHT);
 
     const object = this.ninjaPrototype.clone();
     object.position.copy(this.point);
