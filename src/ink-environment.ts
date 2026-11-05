@@ -38,8 +38,15 @@ const LEAF = ink(0x1b221c);
 const RIDGE = ink(0x474c50);
 const SUN = ink(0xc8402a);
 
-export const FOG_NEAR = 3;
-export const FOG_FAR = 55;
+/** Mist thick enough that a runner only resolves in the last few meters. */
+export const FOG_NEAR = 2;
+export const FOG_FAR = 18;
+/** Runner paths, as azimuths from forward; bamboo stays clear of them. */
+export const LANE_AZIMUTHS = [-30, -18, -6, 6, 18, 30].map((d) => (d * Math.PI) / 180);
+const LANE_HALF_WIDTH = 0.45;
+const BAMBOO_COUNT = 130;
+/** Stalks past the fog's far plane would be pure paper, so stop there. */
+const BAMBOO_MAX_RADIUS = FOG_FAR + 2;
 const SKY_RADIUS = 90;
 /** Panorama half-width before the edge fade to passthrough. */
 const EDGE_FADE_START = (62 * Math.PI) / 180;
@@ -125,8 +132,11 @@ function buildSky(): BufferGeometry {
   );
 }
 
-/** Mountain ridge: dark brushed crest washing out to paper (mist) at its foot. */
-function buildRidge(radius: number, height: number, seed: number): BufferGeometry {
+/**
+ * Mountain ridge: brushed crest washing out to paper (mist) at its foot.
+ * Ridges sit beyond the fog's far plane, so `wash` sets how much ink shows.
+ */
+function buildRidge(radius: number, height: number, seed: number, wash: number): BufferGeometry {
   const random = makeRandom(seed);
   const k1 = 2 + random() * 3;
   const k2 = 6 + random() * 5;
@@ -142,7 +152,7 @@ function buildRidge(radius: number, height: number, seed: number): BufferGeometr
     range(-limit, limit, 56),
     [0, 0.45, 0.8, 1],
     (a, t) => polar(a, radius, foot + (crest(a) - foot) * t),
-    (_a, t) => [PAPER.clone().lerp(RIDGE, smoothstep(0.1, 1, t)), 1],
+    (_a, t) => [PAPER.clone().lerp(RIDGE, wash * smoothstep(0.1, 1, t)), 1],
   );
 }
 
@@ -168,17 +178,15 @@ function buildBamboo(near: number, seed: number): BufferGeometry {
   const random = makeRandom(seed);
   const parts = new PartList();
   const dir = new Vector3();
-  // Clustered groves with open paper between them, as a brush would place
-  // them, spread from just past the room out to where the mist takes over.
-  const groves: Array<{ azimuth: number; radius: number; count: number }> = [];
-  for (let g = 0; g < 9; g++) {
+  // An evenly spread, dense stand that thins into the mist, leaving the
+  // runners' paths clear so they burst out between stalks, not through them.
+  let placed = 0;
+  while (placed < BAMBOO_COUNT) {
     const azimuth = (random() * 2 - 1) * BAMBOO_HALF_ANGLE;
-    const minR = nearEdge(azimuth, near) + 3;
-    groves.push({ azimuth, radius: minR + random() * (26 - minR), count: 4 + Math.floor(random() * 6) });
-  }
-  for (const grove of groves) for (let n = 0; n < grove.count; n++) {
-    const azimuth = grove.azimuth + ((random() - 0.5) * 2.2) / grove.radius;
-    const r = Math.max(nearEdge(azimuth, near) + 2.5, grove.radius + (random() - 0.5) * 2.2);
+    const minR = nearEdge(azimuth, near) + 2;
+    const r = minR + Math.pow(random(), 1.2) * (BAMBOO_MAX_RADIUS - minR);
+    if (LANE_AZIMUTHS.some((lane) => Math.abs(Math.sin(azimuth - lane) * r) < LANE_HALF_WIDTH)) continue;
+    placed++;
     const base = polar(azimuth, r);
     const height = 6 + random() * 5;
     const radius = 0.045 + random() * 0.04;
@@ -191,19 +199,18 @@ function buildBamboo(near: number, seed: number): BufferGeometry {
       const ring = at.clone().addScaledVector(lean, 0.035);
       const rr = radius * (1 - (0.4 * h) / height) * 1.22;
       parts.limb(at, ring, rr, rr, NODE, 5);
-      if (h < height * 0.35 || random() < 0.3) continue;
+      if (h < height * 0.5 || random() < 0.35) continue;
 
       // Twig with a fan of leaves hanging off its end.
       const out = random() * Math.PI * 2;
       dir.set(Math.cos(out), 0.35 + random() * 0.4, Math.sin(out)).normalize();
       const twigEnd = at.clone().addScaledVector(dir, 0.35 + random() * 0.4);
       parts.limb(at, twigEnd, 0.012, 0.006, STALK, 3);
-      const leaves = 4 + Math.floor(random() * 4);
+      const leaves = 3 + Math.floor(random() * 4);
       for (let l = 0; l < leaves; l++) {
         const spread = out + (random() - 0.5) * 1.6;
         dir.set(Math.cos(spread), -0.35 - random() * 0.6, Math.sin(spread)).normalize();
-        // Leaves are the painting's boldest strokes: long and broad.
-        addBlade(parts, twigEnd, dir.clone(), 0.38 + random() * 0.22, 0.045 + random() * 0.02, LEAF);
+        addBlade(parts, twigEnd, dir.clone(), 0.22 + random() * 0.14, 0.022 + random() * 0.01, LEAF);
       }
     }
     // A few grass blades at the foot.
@@ -232,8 +239,9 @@ export class InkEnvironment {
   private groundMaterial = material({ depthWrite: true });
   private skyMaterial = material({ depthWrite: false });
   private inkMaterial = material({ depthWrite: true });
+  private ridgeMaterial = material({ depthWrite: true, fog: false });
   private sunMaterial = material({ vertexColors: false, depthWrite: false, fog: false, color: SUN });
-  private materials: Material[] = [this.groundMaterial, this.skyMaterial, this.inkMaterial, this.sunMaterial];
+  private materials: Material[] = [this.groundMaterial, this.skyMaterial, this.inkMaterial, this.ridgeMaterial, this.sunMaterial];
   private meshes: Mesh[] = [];
   private lookTarget = new Vector3();
 
@@ -261,9 +269,10 @@ export class InkEnvironment {
     const sun = this.addMesh('Sun', new CircleGeometry(4.5, 24), this.sunMaterial, -4);
     sun.position.copy(polar((-24 * Math.PI) / 180, SKY_RADIUS - 5, 26));
     sun.lookAt(0, 1.2, 0);
-    this.addMesh('RidgeFar', buildRidge(47, 12, 3), this.inkMaterial, -3);
-    this.addMesh('RidgeMid', buildRidge(38, 8.5, 7), this.inkMaterial, -2);
-    this.addMesh('RidgeNear', buildRidge(30, 5.5, 11), this.inkMaterial, -1);
+    // Faint silhouettes through the mist.
+    this.addMesh('RidgeFar', buildRidge(66, 15, 3, 0.18), this.ridgeMaterial, -3);
+    this.addMesh('RidgeMid', buildRidge(52, 11, 7, 0.28), this.ridgeMaterial, -2);
+    this.addMesh('RidgeNear', buildRidge(40, 7, 11, 0.4), this.ridgeMaterial, -1);
     this.addMesh('Bamboo', buildBamboo(near, 23), this.inkMaterial, 0);
     this.group.updateMatrixWorld(true);
   }

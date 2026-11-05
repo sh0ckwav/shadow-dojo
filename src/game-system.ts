@@ -7,7 +7,7 @@ import {
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
-import { InkEnvironment } from './ink-environment.js';
+import { InkEnvironment, LANE_AZIMUTHS } from './ink-environment.js';
 import { Ninja, NinjaPhase } from './game-components.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
@@ -26,11 +26,9 @@ const BEST_SCORE_KEY = 'shadow-dojo.best';
 const FRONT_WALL_MAX_ANGLE = (50 * Math.PI) / 180;
 /** Where the painted ground starts when no front wall is detected. */
 const DEFAULT_NEAR = 2.6;
-/** Runners start this far out, deep in the painting's mist. */
-const SPAWN_RADIUS_MIN = 58;
-const SPAWN_RADIUS_MAX = 64;
-/** Runners come from within this angle of the panorama's center. */
-const SPAWN_HALF_ANGLE = (35 * Math.PI) / 180;
+/** Runners start just past the mist's far plane, hidden until they close in. */
+const SPAWN_RADIUS_MIN = 24;
+const SPAWN_RADIUS_MAX = 28;
 const REVEAL_SECONDS = 2;
 
 /** The WebXR plane object held by the XRPlane component. */
@@ -172,7 +170,7 @@ export class GameSystem extends createSystem({
 
   /** Ground sprint speed in m/s for the current wave. */
   runSpeed(): number {
-    return Math.min(22, 14 + this.wave * 1.5);
+    return Math.min(20, 9 + this.wave * 1.5);
   }
 
   private maxConcurrent(): number {
@@ -317,7 +315,9 @@ export class GameSystem extends createSystem({
   /** Start a runner deep in the painting's mist. */
   private spawnNinja(): void {
     this.readHead();
-    const azimuth = (Math.random() * 2 - 1) * SPAWN_HALF_ANGLE;
+    // Come down one of the paths kept clear through the bamboo.
+    const lane = LANE_AZIMUTHS[Math.floor(Math.random() * LANE_AZIMUTHS.length)];
+    const azimuth = lane + (Math.random() - 0.5) * 0.02;
     const radius = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
     this.environment.pointAt(azimuth, radius, this.point).setY(RUN_WAIST_HEIGHT);
 

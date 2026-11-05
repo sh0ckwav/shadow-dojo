@@ -15,15 +15,13 @@ import { PartList } from './lib/low-poly.js';
 //
 // Origin: waist. Forward: +Z (toward the player).
 
-// Ink palette: the figure belongs to the painting it runs out of, so it
-// washes out with the bamboo in the fog and only reads as solid up close.
-const GI = new Color(0x2f3336);
-const GI_SHADE = new Color(0x1d2023);
-const MASK = new Color(0x0e0f11);
-const EYES = new Color(0xe8dcc0);
-const SASH = new Color(0xa8321f);
-const SKIN = new Color(0xb08a6c);
-const WRAP = new Color(0x17191b);
+const GI = new Color(0xa3b2a6);
+const GI_SHADE = new Color(0x84938a);
+const MASK = new Color(0x1f2227);
+const EYES = new Color(0xf2e6c4);
+const SASH = new Color(0x6a2a9a);
+const SKIN = new Color(0xc39672);
+const WRAP = new Color(0x3b4048);
 
 const bodyMaterial = new MeshStandardMaterial({
   vertexColors: true,
