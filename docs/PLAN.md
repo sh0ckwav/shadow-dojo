@@ -9,8 +9,8 @@
 ## Pitch
 
 A 180° sumi-e (ink-wash) painting opens beyond your front wall: bamboo groves, layered mountains
-and a vermilion sun on rice paper. Ink ninjas sprint out of its mist from 60 m away, fast and low along
-the ground, and only leap when they're in striking range. Point a hand and pinch to
+and a vermilion sun on rice paper. The bamboo is dense and the mist thick, so ninjas sprinting down hidden paths
+through it only resolve in the last 10 m or so, then leap when they're in striking range. Point a hand and pinch to
 throw shuriken before they land. One round takes 3–5 minutes, you play seated with no controllers, and
 the room you're sitting in is the level.
 
@@ -53,13 +53,14 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
   assist leads moving runners. A click throws in the 2D browser view. Swept hit tests.
 - `src/scene-assets/ninja-model.ts`: faceted low-poly ninja in three key frames (RunA, RunB, Leap),
   one merged vertex-coloured mesh per frame.
-- `src/ink-environment.ts`: the 180° painting (paper sky and ground with edge fades, three ridge
-  washes, sun, clustered bamboo groves) built from seeded geometry; one scene fog in the paper colour.
+- `src/ink-environment.ts`: the 180° painting (paper sky and ground with edge fades, three faint ridge
+  washes, sun, a dense bamboo stand with clear runner paths) built from seeded geometry; one heavy scene
+  fog in the paper colour.
 - `public/ui/hud.uikitml`: menu, HUD and game-over panel.
 - `.github/workflows/deploy.yml`: typecheck, build and deploy to GitHub Pages on push to `main`.
 
 Emulator checks that passed: the panel appears in front of the player on entering XR, pinching Begin
-starts wave 1, the painting fades in beyond the room, runners appear out of the mist ~55 m out and darken as they approach,
+starts wave 1, the painting fades in beyond the room, runners stay hidden until ~13 m, are plain by ~7 m,
 an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life.
 
 ## Milestones
@@ -79,7 +80,7 @@ an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life
 ## Risks and mitigations
 
 - **Quest 2 performance:** it is the weakest target, so profile there first. Each ninja is one draw call
-  (~1k triangles per frame mesh); cap concurrent ninjas at 5. The painting is ~20k unlit triangles in 7 draw calls; check fill rate of its large transparent sky on Quest 2.
+  (~1k triangles per frame mesh); cap concurrent ninjas at 5. The painting is 7 draw calls of unlit geometry (130 bamboo stalks); check fill rate of its large transparent sky on Quest 2.
 - **No room setup:** without a usable wall the painted ground starts 2.6 m ahead. Show a one-line prompt
   to run Space Setup, but never block play.
 - **No occlusion on Quest 2:** virtual content always draws over the real room, which is why the
@@ -87,8 +88,8 @@ an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life
 - **Hand-ray jitter:** aim assist and firing on the pinch *start* edge are done. Consider
   stabilizing the ray with the wrist instead of the index.
 - **Pinch collisions:** a Start pinch could also throw a star, so there is a 0.4 s grace window (already done).
-- **Grayscale passthrough on Quest 2:** the painting is virtual, so it keeps its colour; check that ink
-  ninjas still read against a dark real floor for the last few meters.
+- **Grayscale passthrough on Quest 2:** the painting is virtual, so it keeps its colour; check that the
+  pale ninjas still read against the real floor for the last few meters.
 - **IP:** the name, art and audio are original. Do not reference SEGA or *Shinobi* in the store copy, title or
   assets; describe the inspiration generically.
 - **Eligibility:** the submitter must be a Meta VR Start member with a developer-enabled Meta account
