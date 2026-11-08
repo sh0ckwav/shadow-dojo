@@ -7,7 +7,7 @@ import {
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
-import { InkEnvironment, LANE_AZIMUTHS } from './ink-environment.js';
+import { BambooForest, LANE_AZIMUTHS, type WallSegment } from './bamboo-forest.js';
 import { Ninja, NinjaPhase } from './game-components.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
@@ -22,22 +22,21 @@ export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase];
 
 const STARTING_LIVES = 3;
 const BEST_SCORE_KEY = 'shadow-dojo.best';
-/** Walls further than this off the facing direction don't count as the front wall. */
-const FRONT_WALL_MAX_ANGLE = (50 * Math.PI) / 180;
-/** Where the painted ground starts when no front wall is detected. */
-const DEFAULT_NEAR = 2.6;
-/** Runners start just past the mist's far plane, hidden until they close in. */
-const SPAWN_RADIUS_MIN = 24;
-const SPAWN_RADIUS_MAX = 28;
+/** Walls further than this from the player are ignored (other rooms, bad scans). */
+const MAX_WALL_DISTANCE = 8;
+/** Runners start at the back of the bamboo, hidden until they close in. */
+const SPAWN_RADIUS_MIN = 15;
+const SPAWN_RADIUS_MAX = 17;
 const REVEAL_SECONDS = 2;
 
 /** The WebXR plane object held by the XRPlane component. */
 type DetectedPlane = { orientation?: string; polygon: DOMPointReadOnly[] };
 
 /**
- * Owns the round loop: menu → waves → game over. At round start a 180° ink
- * painting fades in ahead of the player, its ground beginning at the real
- * front wall found by scene understanding; ninjas sprint out of its mist.
+ * Owns the round loop: menu → waves → game over. At round start a bamboo
+ * forest fades in all around the room, beyond the real walls found by scene
+ * understanding, with mist pooled along the floor and walls; ninjas sprint
+ * out of it.
  */
 export class GameSystem extends createSystem({
   planes: { required: [XRPlane] },
@@ -50,7 +49,7 @@ export class GameSystem extends createSystem({
   best = 0;
   /** Seconds since the current phase began; throws are ignored briefly after Start. */
   phaseTime = 0;
-  readonly environment = new InkEnvironment();
+  readonly environment = new BambooForest();
 
   private toSpawn = 0;
   private spawnTimer = 0;
@@ -61,9 +60,11 @@ export class GameSystem extends createSystem({
   private head = new Vector3();
   private forward = new Vector3();
   private point = new Vector3();
+  private tangent = new Vector3();
   private normal = new Vector3();
   private planeOrigin = new Vector3();
   private planeMatrix = new Matrix4();
+  private time = 0;
 
   private panelEntity?: ReturnType<GameSystem['world']['getSceneEntity']>;
   private titleText?: UIKit.Text;
@@ -79,7 +80,9 @@ export class GameSystem extends createSystem({
       this.best = 0;
     }
     this.world.createTransformEntity(this.environment.group);
-    this.environment.update(0);
+    this.environment.update(0, 0);
+    // Passthrough stays clear above the mist: no scene-wide fog.
+    this.world.scene.fog = null;
 
     const panel = this.world.getSceneObject<UIKitMLAsset>('hud-panel');
     this.panelEntity = this.world.getSceneEntity('hud-panel');
@@ -107,9 +110,6 @@ export class GameSystem extends createSystem({
         }),
       );
     }
-    this.cleanupFuncs.push(() => {
-      if (this.world.scene.fog === this.environment.fog) this.world.scene.fog = null;
-    });
     this.showMenu();
   }
 
@@ -118,6 +118,7 @@ export class GameSystem extends createSystem({
       return;
     }
     this.phaseTime += delta;
+    this.time += delta;
     this.updatePanelPlacement(delta);
 
     const revealTarget =
@@ -126,7 +127,7 @@ export class GameSystem extends createSystem({
     this.reveal = revealTarget > this.reveal
       ? Math.min(revealTarget, this.reveal + step)
       : Math.max(revealTarget, this.reveal - step);
-    this.environment.update(this.reveal);
+    this.environment.update(this.time, this.reveal);
 
     if (this.phase === GamePhase.Intermission && this.phaseTime > 2.2) {
       this.beginWave(this.wave + 1);
@@ -185,7 +186,7 @@ export class GameSystem extends createSystem({
     this.lives = STARTING_LIVES;
     this.openEnvironment();
     this.beginWave(1);
-    // Let the painting fade in before the first runner appears.
+    // Let the forest fade in before the first runner appears.
     this.spawnTimer = REVEAL_SECONDS + 0.5;
     // Park the HUD low in the view so it stays inside a narrow FoV and out of
     // the ninjas' path.
@@ -225,7 +226,7 @@ export class GameSystem extends createSystem({
 
   private showMenu(): void {
     this.setPhase(GamePhase.Menu);
-    this.setStatus('Shadows gather in the bamboo ahead. Point and pinch to throw.');
+    this.setStatus('Shadows gather in the bamboo around you. Point and pinch to throw.');
     this.refreshHud();
   }
 
@@ -271,48 +272,53 @@ export class GameSystem extends createSystem({
     this.forward.normalize();
   }
 
-  /** Paint the half-world in front of the player and switch on its mist. */
+  /** Grow the forest around the room and switch on its mist. */
   private openEnvironment(): void {
     this.readHead();
-    const wall = this.frontWallDistance();
-    const near = wall > 0 ? Math.min(5, Math.max(1.8, wall)) : DEFAULT_NEAR;
-    this.environment.place(this.head, this.forward, near);
-    this.world.scene.fog = this.environment.fog;
+    this.environment.place(this.head, this.forward, this.wallSegments());
   }
 
   /**
-   * Distance straight ahead to the detected wall most squarely in front of
-   * the player, or -1 when none qualifies.
+   * Floor-level footprint of each detected wall near the player, as a
+   * segment between its two horizontal extremes.
    */
-  private frontWallDistance(): number {
-    let bestFacing = Math.cos(FRONT_WALL_MAX_ANGLE);
-    let best = -1;
+  private wallSegments(): WallSegment[] {
+    const walls: WallSegment[] = [];
     for (const entity of this.queries.planes.entities) {
       const plane = entity.getValue(XRPlane, '_plane') as DetectedPlane | undefined;
       const object = entity.object3D;
-      if (plane?.orientation !== 'vertical' || object == null) continue;
+      if (plane?.orientation !== 'vertical' || object == null || plane.polygon.length < 2) continue;
 
       object.updateWorldMatrix(true, false);
       this.planeMatrix.copy(object.matrixWorld);
       this.planeOrigin.setFromMatrixPosition(this.planeMatrix);
-      // WebXR planes use local +Y as the surface normal; face it into the room.
-      this.normal.setFromMatrixColumn(this.planeMatrix, 1).setY(0).normalize();
+      // WebXR planes use local +Y as the surface normal; the wall runs along
+      // the horizontal direction perpendicular to it.
+      this.normal.setFromMatrixColumn(this.planeMatrix, 1).setY(0);
+      if (this.normal.lengthSq() < 1e-4) continue;
+      this.normal.normalize();
       this.point.subVectors(this.head, this.planeOrigin);
-      let distance = this.point.dot(this.normal);
-      if (distance < 0) {
-        this.normal.negate();
-        distance = -distance;
+      if (Math.abs(this.point.dot(this.normal)) > MAX_WALL_DISTANCE) continue;
+      this.tangent.set(-this.normal.z, 0, this.normal.x);
+
+      let min = Infinity;
+      let max = -Infinity;
+      for (const p of plane.polygon) {
+        this.point.set(p.x, p.y, p.z).applyMatrix4(this.planeMatrix).sub(this.planeOrigin);
+        const along = this.point.dot(this.tangent);
+        min = Math.min(min, along);
+        max = Math.max(max, along);
       }
-      const facing = -this.normal.dot(this.forward);
-      if (distance < 1 || distance > 8 || facing < bestFacing) continue;
-      bestFacing = facing;
-      // Distance along the gaze line, not the perpendicular.
-      best = distance / facing;
+      if (max - min < 0.3) continue;
+      walls.push({
+        a: this.planeOrigin.clone().addScaledVector(this.tangent, min).setY(0),
+        b: this.planeOrigin.clone().addScaledVector(this.tangent, max).setY(0),
+      });
     }
-    return best;
+    return walls;
   }
 
-  /** Start a runner deep in the painting's mist. */
+  /** Start a runner at the back of the forest. */
   private spawnNinja(): void {
     this.readHead();
     // Come down one of the paths kept clear through the bamboo.

@@ -1,8 +1,8 @@
 # Shadow Dojo
 
 A seated, hands-first passthrough game for Meta Quest built with the
-[Immersive Web SDK](https://iwsdk.dev). A 180° ink-wash painting of bamboo and misty mountains opens beyond your
-front wall; shadow ninjas sprint out of its mist and leap into your room. Point and pinch to throw shuriken before they land.
+[Immersive Web SDK](https://iwsdk.dev). Your room becomes a clearing in an ink-wash bamboo forest,
+with mist pooled along the floor and walls; shadow ninjas sprint out of it and leap into your room. Point and pinch to throw shuriken before they land.
 
 The entry is for the Meta VR Start Developer Competition 2026 (Gaming track). See [docs/PLAN.md](docs/PLAN.md).
 
@@ -10,7 +10,7 @@ The entry is for the Meta VR Start Developer Competition 2026 (Gaming track). Se
 
 - **Quest 2 / 3 / 3S:** open the GitHub Pages URL in the Meta Quest Browser and choose *Enter
   passthrough*. Set down the controllers so hand tracking takes over. For the best experience, run
-  Space Setup first so the game can find the wall in front of you.
+  Space Setup first so the game can find your walls.
 - **Controls:** point a hand and pinch to throw. Controller triggers also work.
 
 ## Develop

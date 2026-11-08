@@ -8,6 +8,7 @@ import {
 } from '@iwsdk/core';
 import { bevelBox, orientBasis } from './lib/hardsurface.js';
 import { PartList } from './lib/low-poly.js';
+import { applyMist } from '../mist.js';
 
 // Faceted, flat-shaded figure in the spirit of early-90s 3D fighters and
 // faceted public sculpture: few sides per form, colour carried per vertex so
@@ -29,6 +30,8 @@ const bodyMaterial = new MeshStandardMaterial({
   roughness: 0.82,
   metalness: 0.05,
 });
+// Runners stay hidden in the ground mist until they are close.
+applyMist(bodyMaterial);
 
 const j = (x: number, y: number, z: number) => new Vector3(x, y, z);
 const UP = j(0, 1, 0);

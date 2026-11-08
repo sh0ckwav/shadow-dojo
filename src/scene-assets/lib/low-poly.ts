@@ -13,6 +13,7 @@ export interface Part {
   geometry: BufferGeometry;
   matrix: Matrix4;
   color: Color;
+  alpha: number;
 }
 
 const placer = new Object3D();
@@ -21,17 +22,20 @@ const placer = new Object3D();
 export class PartList {
   readonly parts: Part[] = [];
 
+  /** Alpha applies only when merging with `withAlpha`. */
+  alpha = 1;
+
   add(geometry: BufferGeometry, color: Color, matrix = new Matrix4()): void {
-    this.parts.push({ geometry, matrix: matrix.clone(), color });
+    this.parts.push({ geometry, matrix: matrix.clone(), color, alpha: this.alpha });
   }
 
   /** Faceted tube spanning joint `a` to joint `b`, radius tapering r0 → r1. */
-  limb(a: Vector3, b: Vector3, r0: number, r1: number, color: Color, sides = 6): void {
+  limb(a: Vector3, b: Vector3, r0: number, r1: number, color: Color, sides = 6, caps = true): void {
     const length = a.distanceTo(b);
     const geometry = LoftSurface.tube([
       { z: -length / 2, halfW: r0, hUp: r0 },
       { z: length / 2, halfW: r1, hUp: r1 },
-    ]).build([-length / 2, length / 2], sides, true);
+    ]).build([-length / 2, length / 2], sides, caps);
     // Loft runs along +Z; alignSpan expects a Y-up primitive.
     geometry.rotateX(-Math.PI / 2);
     placer.position.set(0, 0, 0);
@@ -60,8 +64,8 @@ export class PartList {
     this.add(geometry, color);
   }
 
-  /** Merge every part into one non-indexed geometry with per-vertex colors. */
-  merge(): BufferGeometry {
+  /** Merge every part into one non-indexed geometry with per-vertex colors (RGBA with `withAlpha`). */
+  merge(withAlpha = false): BufferGeometry {
     const positions: number[] = [];
     const colors: number[] = [];
     const v = new Vector3();
@@ -72,11 +76,12 @@ export class PartList {
         v.fromBufferAttribute(source, i).applyMatrix4(part.matrix);
         positions.push(v.x, v.y, v.z);
         colors.push(part.color.r, part.color.g, part.color.b);
+        if (withAlpha) colors.push(part.alpha);
       }
     }
     const merged = new BufferGeometry();
     merged.setAttribute('position', new Float32BufferAttribute(positions, 3));
-    merged.setAttribute('color', new Float32BufferAttribute(colors, 3));
+    merged.setAttribute('color', new Float32BufferAttribute(colors, withAlpha ? 4 : 3));
     merged.computeVertexNormals();
     return merged;
   }

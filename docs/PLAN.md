@@ -8,9 +8,10 @@
 
 ## Pitch
 
-A 180° sumi-e (ink-wash) painting opens beyond your front wall: bamboo groves, layered mountains
-and a vermilion sun on rice paper. The bamboo is dense and the mist thick, so ninjas sprinting down hidden paths
-through it only resolve in the last 10 m or so, then leap when they're in striking range. Point a hand and pinch to
+Your room is set down in the middle of an ink-wash bamboo forest. Stalks rise all around, beyond every
+real wall; a band of mist pools along the floor and the walls up to ninja height, and above it the room
+stays plain passthrough under a single vermilion sun. Ninjas sprint through the bamboo hidden in that mist
+and only resolve once they are nearly inside the room, then leap when they're in striking range. Point a hand and pinch to
 throw shuriken before they land. One round takes 3–5 minutes, you play seated with no controllers, and
 the room you're sitting in is the level.
 
@@ -29,11 +30,11 @@ general terms. All art and audio are original. All art in the repo is procedural
 | Hands-first, required ("can you finish without a controller?") | Point and pinch throws along the hand's target ray. Menus use hand-ray pinch. Controllers work through the same select path but are optional. |
 | Seated (the "airplane seat test", 2 ft radius) | Ninjas come to you. The only body movement is aiming plus an optional small lean to dodge, because the strike point locks at takeoff. |
 | Easy in and out (≤10 min, clean pause and resume) | Instant Start, waves of about 30 s, a game-over in 3–5 min. The simulation pauses when the session is blurred (Quest menu). |
-| Passthrough must be purposeful | The painting's ground begins at the **detected wall you face**, so your real floor stays visible up to it, and the panorama's edges fade into your room at about ±75°. Ninjas finish their charge inside the real room. |
-| Holds up in untested rooms | The front wall must be 1–8 m away and within 50° of your facing; the start of the painted ground is clamped to 1.8–5 m, with a 2.6 m default when no wall qualifies. Test in 3+ real rooms. |
+| Passthrough must be purposeful | The forest and mist are shaped to the **detected walls** all the way around, so the real room stays visible inside them and everything above ninja height is passthrough except the sun. Ninjas finish their charge inside the real room. |
+| Holds up in untested rooms | Walls within 8 m are traced per direction; the outline is clamped to 1.2–8 m with a 3 m circle where no wall is found. Test in 3+ real rooms. |
 | FoV-aware design | Ninjas spawn within ±35° of where you face at round start. The HUD sits low in the view (about 20° down) at 1.1 m. The glasses-FoV check is a stretch goal. |
 | ≥60 fps on Quest hardware | Low-poly procedural meshes with shared materials, no shadows, no per-frame allocation, swept-sphere hit tests (no raycasters). Profile on **Quest 2** first. |
-| Innovation (25%) | Your room opens onto a living ink painting; ninjas materialize out of its mist at full sprint, like an anime cut-in. |
+| Innovation (25%) | Your room becomes a clearing in a misty bamboo forest; ninjas materialize out of the mist at full sprint, like an anime cut-in. |
 | Polish (25%) | Art pass, spatial audio, hit-stop, a trailer under 3 minutes captured on device. |
 
 **Special prizes worth aiming at:** *Best First Five Minutes* (a wordless tutorial ninja that you must
@@ -44,23 +45,25 @@ types).
 
 The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Quest 3 profile, living-room environment):
 
-- `src/game-system.ts`: round loop (Menu → Waves → Intermission → GameOver), front-wall detection,
-  placing and fading in the painting, spawning deep in its mist, HUD wiring, best score.
+- `src/game-system.ts`: round loop (Menu → Waves → Intermission → GameOver), wall footprints from
+  plane detection, placing and fading in the forest, spawning at its back, HUD wiring, best score.
 - `src/ninja-system.ts`: two-frame limited-animation sprint along the floor → attack leap inside
   2.4 m → strike, plus the defeat tumble.
 - `src/throw-system.ts`: pinch or trigger on either hand throws along that hand's ray. An 8° aim
   assist leads moving runners. A click throws in the 2D browser view. Swept hit tests.
 - `src/scene-assets/ninja-model.ts`: faceted low-poly ninja in three key frames (RunA, RunB, Leap),
   one merged vertex-coloured mesh per frame.
-- `src/ink-environment.ts`: the 180° painting (paper sky and ground with edge fades, three faint ridge
-  washes, sun, a dense bamboo stand with clear runner paths) built from seeded geometry; one heavy scene
-  fog in the paper colour.
+- `src/bamboo-forest.ts`: the 360° forest built from seeded geometry around the room outline (200 ink
+  bamboo stalks with clear runner paths, fading out by distance), a noisy mist bank along the walls and a
+  floor mist, plus the sun. No scene fog.
+- `src/mist.ts`: a shader patch shared by the ninjas and bamboo that sinks anything below ninja height
+  into the mist colour once it is past the walls.
 - `public/ui/hud.uikitml`: menu, HUD and game-over panel.
 - `.github/workflows/deploy.yml`: typecheck, build and deploy to GitHub Pages on push to `main`.
 
 Emulator checks that passed: the panel appears in front of the player on entering XR, pinching Begin
-starts wave 1, the painting fades in beyond the room, runners stay hidden until ~13 m, are plain by ~7 m,
-an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life.
+starts wave 1, the forest fades in around the room, runners are hidden at ~9 m and only start to show
+at ~4.5 m, an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life.
 
 ## Milestones
 
@@ -73,21 +76,21 @@ an aim-assisted throw drops a runner ~5.5 m out, and leaps that land cost a life
 | Nov 11–13 | **M4 Content and retention** | 5-wave run with a final "shadow master" boss, combo multiplier, daily seeded run, local best and ranks, wordless first-time tutorial |
 | Nov 14–15 | **M5 Art and audio** | Final ninja model (`iwsdk-build-model`), stylized ink shader, original SFX and music (commissioned or self-made; licenses recorded) |
 | Nov 16 | **M6 Freeze** | Bug bash in 3+ rooms, Quest 2 at ≥72 fps target (60 fps minimum), cold start <5 s |
-| Nov 17 | **M7 Submission assets** | Trailer under 3 min captured on device (lead with the room opening onto the painting), screenshots, ≤500-word description, hand-interaction write-up, target launch date |
+| Nov 17 | **M7 Submission assets** | Trailer under 3 min captured on device (lead with the room turning into a bamboo clearing), screenshots, ≤500-word description, hand-interaction write-up, target launch date |
 | Nov 18 (AM) | **Submit** | Devpost form complete well before 12:00 PM PT; Pages URL stays unchanged through Dec 11 |
 
 ## Risks and mitigations
 
 - **Quest 2 performance:** it is the weakest target, so profile there first. Each ninja is one draw call
-  (~1k triangles per frame mesh); cap concurrent ninjas at 5. The painting is 7 draw calls of unlit geometry (130 bamboo stalks); check fill rate of its large transparent sky on Quest 2.
-- **No room setup:** without a usable wall the painted ground starts 2.6 m ahead. Show a one-line prompt
+  (~1k triangles per frame mesh); cap concurrent ninjas at 5. The forest is 4 draw calls of unlit geometry (200 bamboo stalks); check fill rate of the transparent mist bank and floor mist on Quest 2.
+- **No room setup:** without detected walls the forest rings a 3 m circle. Show a one-line prompt
   to run Space Setup, but never block play.
-- **No occlusion on Quest 2:** virtual content always draws over the real room, which is why the
-  painting is an opaque half-world rather than objects placed behind real walls.
+- **No occlusion on Quest 2:** virtual content always draws over the real room, so the forest
+  is drawn see-through and fogged where it overlaps the room's walls rather than as solid objects behind them.
 - **Hand-ray jitter:** aim assist and firing on the pinch *start* edge are done. Consider
   stabilizing the ray with the wrist instead of the index.
 - **Pinch collisions:** a Start pinch could also throw a star, so there is a 0.4 s grace window (already done).
-- **Grayscale passthrough on Quest 2:** the painting is virtual, so it keeps its colour; check that the
+- **Grayscale passthrough on Quest 2:** the forest is virtual, so it keeps its colour; check that the
   pale ninjas still read against the real floor for the last few meters.
 - **IP:** the name, art and audio are original. Never name other games or publishers in the store copy,
   title or assets; describe the inspiration generically.
