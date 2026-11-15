@@ -39,6 +39,8 @@ export const LANE_AZIMUTHS = [-48, -32, -16, 0, 16, 32, 48].map((d) => (d * Math
 const LANE_HALF_WIDTH = 0.45;
 const BAMBOO_COUNT = 200;
 export const FOREST_RADIUS = 14;
+/** The wall mist is built this tall so a surge can climb past the ceiling. */
+const BANK_HEIGHT = 6;
 
 /** A wall as a 2D segment on the floor plane (world x/z). */
 export interface WallSegment {
@@ -73,6 +75,7 @@ const mistFragment = /* glsl */ `
   uniform float uTime;
   uniform float uOpacity;
   uniform float uFloor;
+  uniform float uSurge;
   varying vec2 vCoord;
   varying float vFade;
 
@@ -92,11 +95,14 @@ const mistFragment = /* glsl */ `
   }
 
   void main() {
+    // Most of the bank is empty sky until a surge raises the top.
+    if (uFloor < 0.5 && vCoord.y > uMistTop + 0.3) discard;
     float n = fbm(vCoord * 0.9 + vec2(uTime * 0.12, uTime * 0.03));
     float alpha;
     if (uFloor > 0.5) {
       // vFade: 0 around the player, 1 at the walls.
       alpha = smoothstep(0.0, 1.0, vFade) * (0.45 + 0.4 * n);
+      alpha = mix(alpha, 0.85 + 0.15 * n, uSurge);
     } else {
       // vCoord.y is height in meters; a ragged, drifting top edge.
       float top = uMistTop + (n - 0.5) * 0.5;
@@ -116,6 +122,7 @@ function mistMaterial(floor: boolean): ShaderMaterial {
       uTime: { value: 0 },
       uOpacity: { value: 0 },
       uFloor: { value: floor ? 1 : 0 },
+      uSurge: { value: 0 },
     },
     transparent: true,
     depthWrite: false,
@@ -162,7 +169,7 @@ function buildMistBank(radii: number[]): BufferGeometry {
   const positions: number[] = [];
   const uvs: number[] = [];
   const fades: number[] = [];
-  const height = MIST_TOP + 0.4;
+  const height = BANK_HEIGHT;
   let along = 0;
   const ring: Array<{ p: Vector3; u: number }> = [];
   for (let i = 0; i <= AZIMUTH_STEPS; i++) {
@@ -368,11 +375,18 @@ export class BambooForest {
     return this.group.localToWorld(target);
   }
 
-  update(time: number, opacity: number): void {
+  /**
+   * `opacity` fades the whole forest in or out; `surge` (0–1) raises the
+   * mist from ninja height up past the ceiling and fills the floor, for the
+   * transition between waves.
+   */
+  update(time: number, opacity: number, surge = 0): void {
+    mistUniforms.uMistTop.value = MIST_TOP + surge * (BANK_HEIGHT - MIST_TOP);
     for (const m of this.fadeMaterials) m.opacity = opacity;
     for (const m of this.mistMaterials) {
       m.uniforms.uTime.value = time;
       m.uniforms.uOpacity.value = opacity;
+      m.uniforms.uSurge.value = surge;
     }
     this.group.visible = opacity > 0.001;
   }

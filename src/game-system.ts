@@ -9,6 +9,7 @@ import {
 } from '@iwsdk/core';
 import { BambooForest, LANE_AZIMUTHS, type WallSegment } from './bamboo-forest.js';
 import { Ninja, NinjaPhase } from './game-components.js';
+import { Hud, MistVeil } from './hud.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
 
@@ -28,6 +29,21 @@ const MAX_WALL_DISTANCE = 8;
 const SPAWN_RADIUS_MIN = 15;
 const SPAWN_RADIUS_MAX = 17;
 const REVEAL_SECONDS = 2;
+// Between waves the mist rolls over everything, the next wave is announced,
+// then it sinks back to the walls. Seconds from the start of the transition:
+const VEIL_RISE = [0.4, 1.6] as const;
+const VEIL_FALL = [2.6, 4.0] as const;
+const BANNER_IN = [1.2, 1.6] as const;
+const BANNER_OUT = [2.4, 2.8] as const;
+/** The next wave starts while the mist is still sinking... */
+const NEXT_WAVE_AT = 2.8;
+/** ...and its first runner leaves the bamboo once the view is clear. */
+const FIRST_SPAWN_DELAY = 1.6;
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 /** The WebXR plane object held by the XRPlane component. */
 type DetectedPlane = { orientation?: string; polygon: DOMPointReadOnly[] };
@@ -50,6 +66,8 @@ export class GameSystem extends createSystem({
   /** Seconds since the current phase began; throws are ignored briefly after Start. */
   phaseTime = 0;
   readonly environment = new BambooForest();
+  readonly hud = new Hud();
+  readonly veil = new MistVeil();
 
   private toSpawn = 0;
   private spawnTimer = 0;
@@ -65,12 +83,12 @@ export class GameSystem extends createSystem({
   private planeOrigin = new Vector3();
   private planeMatrix = new Matrix4();
   private time = 0;
+  /** Seconds into the between-wave mist transition, or -1 when none. */
+  private transition = -1;
 
   private panelEntity?: ReturnType<GameSystem['world']['getSceneEntity']>;
   private titleText?: UIKit.Text;
   private statusText?: UIKit.Text;
-  private scoreText?: UIKit.Text;
-  private livesText?: UIKit.Text;
   private startButton?: ReturnType<UIKitMLAsset['getElementById']>;
 
   init(): void {
@@ -81,6 +99,10 @@ export class GameSystem extends createSystem({
     }
     this.world.createTransformEntity(this.environment.group);
     this.environment.update(0, 0);
+    // Head-locked: the HUD strip, wave banner and veil ride on the camera.
+    const camera = this.world.camera;
+    camera.add(this.hud.group, this.veil.mesh);
+    this.cleanupFuncs.push(() => camera.remove(this.hud.group, this.veil.mesh));
     // Passthrough stays clear above the mist: no scene-wide fog.
     this.world.scene.fog = null;
 
@@ -89,8 +111,6 @@ export class GameSystem extends createSystem({
     if (panel != null) {
       this.titleText = panel.getElementById<UIKit.Text>('title') ?? undefined;
       this.statusText = panel.getElementById<UIKit.Text>('status') ?? undefined;
-      this.scoreText = panel.getElementById<UIKit.Text>('score') ?? undefined;
-      this.livesText = panel.getElementById<UIKit.Text>('lives') ?? undefined;
       this.startButton = panel.getElementById('start-button') ?? undefined;
       const xrButton = panel.getElementById('xr-button');
       const onStart = () => this.startGame();
@@ -127,12 +147,8 @@ export class GameSystem extends createSystem({
     this.reveal = revealTarget > this.reveal
       ? Math.min(revealTarget, this.reveal + step)
       : Math.max(revealTarget, this.reveal - step);
-    this.environment.update(this.time, this.reveal);
+    this.updateTransition(delta);
 
-    if (this.phase === GamePhase.Intermission && this.phaseTime > 2.2) {
-      this.beginWave(this.wave + 1);
-      return;
-    }
     if (this.phase !== GamePhase.Playing) return;
 
     this.spawnTimer -= delta;
@@ -143,9 +159,29 @@ export class GameSystem extends createSystem({
       this.spawnTimer = Math.max(0.5, 1.6 - this.wave * 0.12) * (0.7 + Math.random() * 0.6);
     }
     if (this.toSpawn === 0 && alive === 0) {
-      this.setPhase(GamePhase.Intermission);
-      this.setStatus(`Wave ${this.wave} cleared`);
+      this.startTransition();
     }
+  }
+
+  /** Mist over everything, announce the next wave, then let it sink. */
+  private startTransition(): void {
+    this.setPhase(GamePhase.Intermission);
+    this.transition = 0;
+  }
+
+  private updateTransition(delta: number): void {
+    let veil = 0;
+    let banner = 0;
+    if (this.transition >= 0) {
+      const t = (this.transition += delta);
+      veil = smoothstep(VEIL_RISE[0], VEIL_RISE[1], t) * (1 - smoothstep(VEIL_FALL[0], VEIL_FALL[1], t));
+      banner = smoothstep(BANNER_IN[0], BANNER_IN[1], t) * (1 - smoothstep(BANNER_OUT[0], BANNER_OUT[1], t));
+      if (this.phase === GamePhase.Intermission && t >= NEXT_WAVE_AT) this.beginWave(this.wave + 1);
+      if (t >= VEIL_FALL[1]) this.transition = -1;
+    }
+    this.environment.update(this.time, this.reveal, veil);
+    this.veil.update(this.time, veil);
+    this.hud.showBanner(`WAVE ${this.wave + (this.phase === GamePhase.Intermission ? 1 : 0)}`, banner);
   }
 
   /** Called by ThrowSystem. */
@@ -184,13 +220,13 @@ export class GameSystem extends createSystem({
     }
     this.score = 0;
     this.lives = STARTING_LIVES;
+    this.wave = 0;
     this.openEnvironment();
-    this.beginWave(1);
-    // Let the forest fade in before the first runner appears.
-    this.spawnTimer = REVEAL_SECONDS + 0.5;
-    // Park the HUD low in the view so it stays inside a narrow FoV and out of
-    // the ninjas' path.
-    this.placePanel(1.1, -0.42);
+    // The forest grows in behind the first mist surge, which announces wave 1.
+    this.startTransition();
+    this.refreshHud();
+    this.setPanelVisible(false);
+    this.hud.setVisible(true);
     this.startButton?.setProperties({ display: 'none' });
     this.titleText?.setProperties({ display: 'none' });
   }
@@ -198,14 +234,14 @@ export class GameSystem extends createSystem({
   private beginWave(wave: number): void {
     this.wave = wave;
     this.toSpawn = 3 + wave * 2;
-    this.spawnTimer = 1;
+    this.spawnTimer = FIRST_SPAWN_DELAY;
     this.setPhase(GamePhase.Playing);
-    this.setStatus(`Wave ${wave}`);
     this.refreshHud();
   }
 
   private endGame(): void {
     this.setPhase(GamePhase.GameOver);
+    this.transition = -1;
     for (const ninja of this.queries.ninjas.entities) {
       ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
       ninja.setValue(Ninja, 'timer', 0);
@@ -221,6 +257,7 @@ export class GameSystem extends createSystem({
     this.setStatus(`Defeated on wave ${this.wave}. Best ${this.best}`);
     this.titleText?.setProperties({ display: 'flex', text: 'The shadows win' });
     this.startButton?.setProperties({ display: 'flex' });
+    this.setPanelVisible(true);
     this.placePanel(0.85, -0.12);
   }
 
@@ -240,16 +277,20 @@ export class GameSystem extends createSystem({
   }
 
   private refreshHud(): void {
-    this.scoreText?.setProperties({ text: `Score ${this.score}` });
-    this.livesText?.setProperties({ text: `Lives ${this.lives}` });
+    this.hud.set(this.score, this.wave, this.lives);
+  }
+
+  /** The menu panel is only for menus; the round uses the head-locked HUD. */
+  private setPanelVisible(visible: boolean): void {
+    const object = this.panelEntity?.object3D;
+    if (object != null) object.visible = visible;
   }
 
   private updatePanelPlacement(delta: number): void {
     if (this.panelPlacementDelay < 0) return;
     this.panelPlacementDelay -= delta;
     if (this.panelPlacementDelay >= 0) return;
-    const inRound = this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission;
-    this.placePanel(inRound ? 1.1 : 0.85, inRound ? -0.42 : -0.12);
+    this.placePanel(0.85, -0.12);
   }
 
   /** Put the panel in front of the head, `down` meters below eye level, facing it. */

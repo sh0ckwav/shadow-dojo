@@ -32,7 +32,7 @@ general terms. All art and audio are original. All art in the repo is procedural
 | Easy in and out (≤10 min, clean pause and resume) | Instant Start, waves of about 30 s, a game-over in 3–5 min. The simulation pauses when the session is blurred (Quest menu). |
 | Passthrough must be purposeful | The forest and mist are shaped to the **detected walls** all the way around, so the real room stays visible inside them and everything above ninja height is passthrough except the sun. Ninjas finish their charge inside the real room. |
 | Holds up in untested rooms | Walls within 8 m are traced per direction; the outline is clamped to 1.2–8 m with a 3 m circle where no wall is found. Test in 3+ real rooms. |
-| FoV-aware design | Ninjas spawn within ±35° of where you face at round start. The HUD sits low in the view (about 20° down) at 1.1 m. The glasses-FoV check is a stretch goal. |
+| FoV-aware design | Ninjas spawn within ±35° of where you face at round start. The in-round HUD is a head-locked strip about 20° up, ~66° wide. The glasses-FoV check is a stretch goal. |
 | ≥60 fps on Quest hardware | Low-poly procedural meshes with shared materials, no shadows, no per-frame allocation, swept-sphere hit tests (no raycasters). Profile on **Quest 2** first. |
 | Innovation (25%) | Your room becomes a clearing in a misty bamboo forest; ninjas materialize out of the mist at full sprint, like an anime cut-in. |
 | Polish (25%) | Art pass, spatial audio, hit-stop, a trailer under 3 minutes captured on device. |
@@ -56,9 +56,13 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
 - `src/bamboo-forest.ts`: the 360° forest built from seeded geometry around the room outline (200 ink
   bamboo stalks with clear runner paths, fading out by distance), a noisy mist bank along the walls and a
   floor mist, plus the sun. No scene fog.
+- `src/hud.ts`: head-locked arcade strip across the top of the view (score digits left, wave seal
+  centre, ninja-head life icons right) in the Shojumaru display face, the wave banner, and the
+  full-view mist veil. Between waves the mist rolls over everything, announces the next wave, then sinks
+  back to the walls.
 - `src/mist.ts`: a shader patch shared by the ninjas and bamboo that sinks anything below ninja height
   into the mist colour once it is past the walls.
-- `public/ui/hud.uikitml`: menu, HUD and game-over panel.
+- `public/ui/hud.uikitml`: menu and game-over panel (hidden during a round).
 - `.github/workflows/deploy.yml`: typecheck, build and deploy to GitHub Pages on push to `main`.
 
 Emulator checks that passed: the panel appears in front of the player on entering XR, pinching Begin
@@ -107,4 +111,4 @@ at ~4.5 m, an aim-assisted throw drops a runner ~5.5 m out, and leaps that land 
 - [ ] Description: inspiration, how it was built, future plans, target launch date
 - [ ] Hand interaction write-up
 - [ ] Track: Gaming · Division: New Experience
-- [ ] All third-party assets licensed and listed in `CREDITS.md`
+- [ ] All third-party assets licensed and listed in `CREDITS.md` (so far: Shojumaru font, SIL OFL 1.1, via Fontsource)
