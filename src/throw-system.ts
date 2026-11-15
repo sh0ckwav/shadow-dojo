@@ -5,7 +5,8 @@ import {
   Vector3,
   VisibilityState,
 } from '@iwsdk/core';
-import { Ninja, NinjaPhase, Shuriken } from './game-components.js';
+import { BossSystem } from './boss-system.js';
+import { Boss, BossPhase, Ninja, NinjaPhase, Shuriken } from './game-components.js';
 import { GamePhase, GameSystem } from './game-system.js';
 import { createShuriken } from './scene-assets/ninja.scene-asset.js';
 
@@ -14,6 +15,11 @@ const COOLDOWN = 0.18;
 const HIT_RADIUS = 0.36;
 /** Hit sphere center above the ninja's waist origin (chest height). */
 const CHEST_HEIGHT = 0.3;
+/** The samurai is bigger: a wider hit sphere, a little higher on the body. */
+const BOSS_HIT_RADIUS = 0.5;
+const BOSS_CHEST_HEIGHT = 0.35;
+/** He crosses the view fast and close, so the boss gets a wider assist cone. */
+const BOSS_ASSIST_COS = Math.cos((15 * Math.PI) / 180);
 /** Ignore the pinch that pressed Start. */
 const START_GRACE = 0.4;
 /** Throws within this angle of a ninja's intercept point snap onto it. */
@@ -28,8 +34,10 @@ const HANDS = ['left', 'right'] as const;
 export class ThrowSystem extends createSystem({
   stars: { required: [Shuriken] },
   ninjas: { required: [Ninja] },
+  bosses: { required: [Boss] },
 }) {
   private game?: GameSystem;
+  private bossSystem?: BossSystem;
   private prototype!: Mesh;
   private cooldown = { left: 0, right: 0 };
   private pendingClick = false;
@@ -48,6 +56,7 @@ export class ThrowSystem extends createSystem({
 
   init(): void {
     this.game = this.world.getSystem(GameSystem);
+    this.bossSystem = this.world.getSystem(BossSystem);
     this.prototype = createShuriken();
 
     const canvas = this.world.renderer.domElement;
@@ -143,16 +152,44 @@ export class ThrowSystem extends createSystem({
         this.intercept.copy(target.position).addScaledVector(this.velocity, flight);
         this.intercept.y += CHEST_HEIGHT;
       }
-      this.intercept.sub(this.origin);
-      const distance = this.intercept.length();
-      const cos = this.intercept.dot(this.direction) / Math.max(distance, 1e-4);
+      const cos = this.considerIntercept(bestCos);
       if (cos > bestCos) {
         bestCos = cos;
-        this.bestIntercept.copy(this.intercept).divideScalar(distance);
+        found = true;
+      }
+    }
+    for (const boss of this.queries.bosses.entities) {
+      const phase = boss.getValue(Boss, 'phase');
+      const target = boss.object3D;
+      if (target == null || (phase !== BossPhase.Circling && phase !== BossPhase.Windup)) continue;
+      const v = boss.getVectorView(Boss, 'velocity');
+      this.velocity.set(v[0], 0, v[2]);
+      this.intercept.copy(target.position);
+      for (let pass = 0; pass < 2; pass++) {
+        const flight = this.intercept.distanceTo(this.origin) / THROW_SPEED;
+        this.intercept.copy(target.position).addScaledVector(this.velocity, flight);
+        this.intercept.y += BOSS_CHEST_HEIGHT;
+      }
+      const threshold = found ? bestCos : Math.min(bestCos, BOSS_ASSIST_COS);
+      const cos = this.considerIntercept(threshold);
+      if (cos > threshold) {
+        bestCos = cos;
         found = true;
       }
     }
     if (found) this.direction.copy(this.bestIntercept);
+  }
+
+  /**
+   * Score `intercept` (world point) against the throw line; if it beats
+   * `bestCos`, store it as the best direction. Returns its cosine.
+   */
+  private considerIntercept(bestCos: number): number {
+    this.intercept.sub(this.origin);
+    const distance = this.intercept.length();
+    const cos = this.intercept.dot(this.direction) / Math.max(distance, 1e-4);
+    if (cos > bestCos) this.bestIntercept.copy(this.intercept).divideScalar(distance);
+    return cos;
   }
 
   private moveStar(star: Entity, delta: number): void {
@@ -188,6 +225,19 @@ export class ThrowSystem extends createSystem({
         ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
         ninja.setValue(Ninja, 'timer', 0);
         this.game?.onNinjaDefeated(target.position.distanceTo(this.head));
+        star.dispose({ disposeResources: false });
+        return;
+      }
+    }
+    for (const boss of this.queries.bosses.entities) {
+      const target = boss.object3D;
+      if (target == null) continue;
+      this.toNinja.subVectors(target.position, this.previous);
+      this.toNinja.y += BOSS_CHEST_HEIGHT;
+      const u = lengthSq > 0 ? Math.min(1, Math.max(0, this.toNinja.dot(this.segment) / lengthSq)) : 0;
+      this.closest.copy(this.previous).addScaledVector(this.segment, u);
+      this.closest.y -= BOSS_CHEST_HEIGHT;
+      if (this.closest.distanceTo(target.position) < BOSS_HIT_RADIUS && this.bossSystem?.hit(boss)) {
         star.dispose({ disposeResources: false });
         return;
       }

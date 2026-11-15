@@ -11,7 +11,10 @@
 Your room is set down in the middle of an ink-wash bamboo forest. Stalks rise all around, beyond every
 real wall; a band of mist pools along the floor and the walls up to ninja height, and above it the room
 stays plain passthrough under a single vermilion sun. Ninjas sprint through the bamboo hidden in that mist
-and only resolve once they are nearly inside the room, then leap when they're in striking range. Point a hand and pinch to
+and only resolve once they are nearly inside the room, then leap when they're in striking range.
+After every third wave a samurai steps out of the mist and circles the room, weaving in and out of
+it; he takes several stars to bring down, and if he's still standing when his time runs out he raises
+his sword and cuts you down, ending the run. Point a hand and pinch to
 throw shuriken before they land. One round takes 3–5 minutes, you play seated with no controllers, and
 the room you're sitting in is the level.
 
@@ -56,6 +59,12 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
 - `src/bamboo-forest.ts`: the 360° forest built from seeded geometry around the room outline (200 ink
   bamboo stalks with clear runner paths, fading out by distance), a noisy mist bank along the walls and a
   floor mist, plus the sun. No scene fog.
+- `src/boss-system.ts` + `src/scene-assets/samurai-model.ts`: the samurai boss after every 3rd wave.
+  A faceted armoured samurai (lacquered iron with red lacing, crescent crest, red face mask, katana)
+  in four key frames: two side-step frames, an overhead windup, and a lunging cut. He circles the
+  player at about the room radius, reverses and speeds up when hit, needs 8 hits (+2 per later boss),
+  and after 30 s (−3 s per later boss, min 20 s) winds up for 1.4 s and cuts: all lives lost. Throws
+  get a 15° aim assist on him. In dev builds, B during a ninja wave skips to him.
 - `src/hud.ts`: head-locked arcade strip across the top of the view (score digits left, wave seal
   centre, ninja-head life icons right) in the Shojumaru display face, the wave banner, and the
   full-view mist veil. Between waves the mist rolls over everything, announces the next wave, then sinks

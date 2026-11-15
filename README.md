@@ -2,7 +2,8 @@
 
 A seated, hands-first passthrough game for Meta Quest built with the
 [Immersive Web SDK](https://iwsdk.dev). Your room becomes a clearing in an ink-wash bamboo forest,
-with mist pooled along the floor and walls; shadow ninjas sprint out of it and leap into your room. Point and pinch to throw shuriken before they land.
+with mist pooled along the floor and walls; shadow ninjas sprint out of it and leap into your room. Every third wave a
+samurai circles you; bring him down before he draws his sword. Point and pinch to throw shuriken before they land.
 
 The entry is for the Meta VR Start Developer Competition 2026 (Gaming track). See [docs/PLAN.md](docs/PLAN.md).
 

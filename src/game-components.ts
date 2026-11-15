@@ -28,3 +28,42 @@ export const Shuriken = createComponent('Shuriken', {
   velocity: { type: Types.Vec3, default: [0, 0, -10] },
   life: { type: Types.Float32, default: 1.5 },
 });
+
+export const BossPhase = {
+  Circling: 'Circling',
+  Windup: 'Windup',
+  Striking: 'Striking',
+  Defeated: 'Defeated',
+} as const;
+
+/**
+ * The samurai boss. Circles the player around the room, takes several hits,
+ * and if still standing when `attackAt` runs out, raises his sword and cuts
+ * the player down. Angles are around `center`, world space.
+ */
+export const Boss = createComponent('Boss', {
+  phase: { type: Types.Enum, default: BossPhase.Circling, enum: BossPhase },
+  /** Seconds in the current phase. */
+  timer: { type: Types.Float32, default: 0 },
+  /** Seconds since the fight began. */
+  clock: { type: Types.Float32, default: 0 },
+  /** The fight's time limit in seconds; the windup starts when it runs out. */
+  attackAt: { type: Types.Float32, default: 30 },
+  hp: { type: Types.Int16, default: 8 },
+  maxHp: { type: Types.Int16, default: 8 },
+  /** Orbit angle (radians) and angular velocity (radians/s, signed). */
+  angle: { type: Types.Float32, default: 0 },
+  spin: { type: Types.Float32, default: 0.7 },
+  /** Orbit radius the circling settles around, meters. */
+  radius: { type: Types.Float32, default: 2.6 },
+  /** Seconds until the next change of direction. */
+  turnIn: { type: Types.Float32, default: 4 },
+  /** Seconds of hit flash left. */
+  flash: { type: Types.Float32, default: 0 },
+  center: { type: Types.Vec3, default: [0, 0, 0] },
+  /** Current ground velocity, for aim assist. */
+  velocity: { type: Types.Vec3, default: [0, 0, 0] },
+  /** Strike: lunge start and end. */
+  origin: { type: Types.Vec3, default: [0, 1, -3] },
+  target: { type: Types.Vec3, default: [0, 1, 0] },
+});

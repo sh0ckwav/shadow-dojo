@@ -8,10 +8,11 @@ import {
   XRPlane,
 } from '@iwsdk/core';
 import { BambooForest, LANE_AZIMUTHS, type WallSegment } from './bamboo-forest.js';
-import { Ninja, NinjaPhase } from './game-components.js';
+import { Boss, BossPhase, Ninja, NinjaPhase } from './game-components.js';
 import { Hud, MistVeil } from './hud.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
+import { createSamuraiModel, SAMURAI_WAIST_HEIGHT } from './scene-assets/samurai-model.js';
 
 export const GamePhase = {
   Menu: 'Menu',
@@ -40,6 +41,18 @@ const NEXT_WAVE_AT = 2.8;
 /** ...and its first runner leaves the bamboo once the view is clear. */
 const FIRST_SPAWN_DELAY = 1.6;
 
+/** A samurai boss follows every this many waves. */
+const BOSS_EVERY = 3;
+const BOSS_BANNER = 'SAMURAI';
+/** First boss: hits to defeat and seconds before he attacks. Later ones get tougher. */
+const BOSS_HP = 8;
+const BOSS_HP_STEP = 2;
+const BOSS_TIME = 30;
+const BOSS_TIME_STEP = 3;
+const BOSS_MIN_TIME = 20;
+const BOSS_HIT_SCORE = 100;
+const BOSS_DEFEAT_SCORE = 1000;
+
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -57,6 +70,7 @@ type DetectedPlane = { orientation?: string; polygon: DOMPointReadOnly[] };
 export class GameSystem extends createSystem({
   planes: { required: [XRPlane] },
   ninjas: { required: [Ninja] },
+  bosses: { required: [Boss] },
 }) {
   phase: GamePhase = GamePhase.Menu;
   score = 0;
@@ -85,6 +99,13 @@ export class GameSystem extends createSystem({
   private time = 0;
   /** Seconds into the between-wave mist transition, or -1 when none. */
   private transition = -1;
+  /** What the current transition leads into, and the banner announcing it. */
+  private nextIsBoss = false;
+  private bannerText = '';
+  /** True while the samurai fight is on instead of a ninja wave. */
+  private bossRound = false;
+  private bossesBeaten = 0;
+  private samuraiPrototype = createSamuraiModel();
 
   private panelEntity?: ReturnType<GameSystem['world']['getSceneEntity']>;
   private titleText?: UIKit.Text;
@@ -130,6 +151,16 @@ export class GameSystem extends createSystem({
         }),
       );
     }
+    if (import.meta.env.DEV) {
+      // Dev-only: B during a ninja wave skips straight to the samurai.
+      const onKey = (event: KeyboardEvent) => {
+        if (event.code !== 'KeyB' || this.phase !== GamePhase.Playing || this.bossRound) return;
+        for (const ninja of this.queries.ninjas.entities) ninja.dispose({ disposeResources: false });
+        this.startTransition(true);
+      };
+      window.addEventListener('keydown', onKey);
+      this.cleanupFuncs.push(() => window.removeEventListener('keydown', onKey));
+    }
     this.showMenu();
   }
 
@@ -150,6 +181,10 @@ export class GameSystem extends createSystem({
     this.updateTransition(delta);
 
     if (this.phase !== GamePhase.Playing) return;
+    if (this.bossRound) {
+      this.updateBossHud();
+      return;
+    }
 
     this.spawnTimer -= delta;
     const alive = this.queries.ninjas.entities.size;
@@ -159,14 +194,16 @@ export class GameSystem extends createSystem({
       this.spawnTimer = Math.max(0.5, 1.6 - this.wave * 0.12) * (0.7 + Math.random() * 0.6);
     }
     if (this.toSpawn === 0 && alive === 0) {
-      this.startTransition();
+      this.startTransition(this.wave % BOSS_EVERY === 0);
     }
   }
 
-  /** Mist over everything, announce the next wave, then let it sink. */
-  private startTransition(): void {
+  /** Mist over everything, announce what comes next, then let it sink. */
+  private startTransition(toBoss: boolean): void {
     this.setPhase(GamePhase.Intermission);
     this.transition = 0;
+    this.nextIsBoss = toBoss;
+    this.bannerText = toBoss ? BOSS_BANNER : `WAVE ${this.wave + 1}`;
   }
 
   private updateTransition(delta: number): void {
@@ -176,12 +213,40 @@ export class GameSystem extends createSystem({
       const t = (this.transition += delta);
       veil = smoothstep(VEIL_RISE[0], VEIL_RISE[1], t) * (1 - smoothstep(VEIL_FALL[0], VEIL_FALL[1], t));
       banner = smoothstep(BANNER_IN[0], BANNER_IN[1], t) * (1 - smoothstep(BANNER_OUT[0], BANNER_OUT[1], t));
-      if (this.phase === GamePhase.Intermission && t >= NEXT_WAVE_AT) this.beginWave(this.wave + 1);
+      if (this.phase === GamePhase.Intermission && t >= NEXT_WAVE_AT) {
+        if (this.nextIsBoss) this.beginBoss();
+        else this.beginWave(this.wave + 1);
+      }
       if (t >= VEIL_FALL[1]) this.transition = -1;
     }
     this.environment.update(this.time, this.reveal, veil);
     this.veil.update(this.time, veil);
-    this.hud.showBanner(`WAVE ${this.wave + (this.phase === GamePhase.Intermission ? 1 : 0)}`, banner);
+    this.hud.showBanner(this.bannerText, banner);
+  }
+
+  /** Called by BossSystem when a star lands on the samurai. */
+  onBossHit(): void {
+    this.score += BOSS_HIT_SCORE;
+    this.refreshHud();
+  }
+
+  /** Called by BossSystem on the final hit. */
+  onBossDefeated(): void {
+    if (this.phase !== GamePhase.Playing) return;
+    this.score += BOSS_HIT_SCORE + BOSS_DEFEAT_SCORE;
+    this.bossesBeaten++;
+    this.bossRound = false;
+    this.hud.setBoss(null);
+    this.refreshHud();
+    this.startTransition(false);
+  }
+
+  /** Called by BossSystem when the cut lands: every remaining life is lost. */
+  onBossStrike(): void {
+    if (this.phase !== GamePhase.Playing) return;
+    this.lives = 0;
+    this.refreshHud();
+    this.endGame('Cut down by the samurai');
   }
 
   /** Called by ThrowSystem. */
@@ -221,9 +286,14 @@ export class GameSystem extends createSystem({
     this.score = 0;
     this.lives = STARTING_LIVES;
     this.wave = 0;
+    this.bossRound = false;
+    this.bossesBeaten = 0;
+    this.hud.setBoss(null);
+    // A samurai left standing over the last game leaves with it.
+    for (const boss of this.queries.bosses.entities) boss.dispose({ disposeResources: false });
     this.openEnvironment();
     // The forest grows in behind the first mist surge, which announces wave 1.
-    this.startTransition();
+    this.startTransition(false);
     this.refreshHud();
     this.setPanelVisible(false);
     this.hud.setVisible(true);
@@ -239,9 +309,58 @@ export class GameSystem extends createSystem({
     this.refreshHud();
   }
 
-  private endGame(): void {
+  /** The samurai steps out of the mist and starts circling. */
+  private beginBoss(): void {
+    this.bossRound = true;
+    this.setPhase(GamePhase.Playing);
+    this.readHead();
+    const origin = this.environment.origin;
+    const object = this.samuraiPrototype.clone();
+    // Start straight ahead so his entrance is seen.
+    const angle = Math.atan2(this.forward.x, this.forward.z);
+    object.position.set(origin.x + Math.sin(angle) * 8, SAMURAI_WAIST_HEIGHT, origin.z + Math.cos(angle) * 8);
+    const maxHp = BOSS_HP + this.bossesBeaten * BOSS_HP_STEP;
+    const boss = this.world.createTransformEntity(object);
+    boss.addComponent(Boss, {
+      phase: BossPhase.Circling,
+      hp: maxHp,
+      maxHp,
+      attackAt: Math.max(BOSS_MIN_TIME, BOSS_TIME - this.bossesBeaten * BOSS_TIME_STEP),
+      angle,
+      spin: (Math.random() < 0.5 ? -1 : 1) * 0.55,
+      // Inside the walls so he is seen, weaving out into the mist.
+      radius: Math.min(3.4, Math.max(1.8, this.environment.roomRadius - 0.5)),
+      turnIn: 3 + Math.random() * 2,
+    });
+    boss.getVectorView(Boss, 'center').set([origin.x, 0, origin.z]);
+    this.refreshHud();
+    this.updateBossHud();
+  }
+
+  private bossEntity() {
+    for (const boss of this.queries.bosses.entities) {
+      if (boss.getValue(Boss, 'phase') !== BossPhase.Defeated) return boss;
+    }
+    return undefined;
+  }
+
+  private updateBossHud(): void {
+    const boss = this.bossEntity();
+    if (boss == null) return;
+    const attackAt = boss.getValue(Boss, 'attackAt') ?? 30;
+    const clock = boss.getValue(Boss, 'clock') ?? 0;
+    this.hud.setBoss({
+      hp: boss.getValue(Boss, 'hp') ?? 0,
+      maxHp: boss.getValue(Boss, 'maxHp') ?? 1,
+      timeLeft: Math.max(0, 1 - clock / attackAt),
+    });
+  }
+
+  private endGame(title = 'The shadows win'): void {
     this.setPhase(GamePhase.GameOver);
     this.transition = -1;
+    this.bossRound = false;
+    this.hud.setBoss(null);
     for (const ninja of this.queries.ninjas.entities) {
       ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
       ninja.setValue(Ninja, 'timer', 0);
@@ -254,8 +373,8 @@ export class GameSystem extends createSystem({
         // Storage can be unavailable in private sessions; the best score is a nicety.
       }
     }
-    this.setStatus(`Defeated on wave ${this.wave}. Best ${this.best}`);
-    this.titleText?.setProperties({ display: 'flex', text: 'The shadows win' });
+    this.setStatus(`Score ${this.score} on wave ${this.wave}. Best ${this.best}`);
+    this.titleText?.setProperties({ display: 'flex', text: title });
     this.startButton?.setProperties({ display: 'flex' });
     this.setPanelVisible(true);
     this.placePanel(0.85, -0.12);

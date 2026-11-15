@@ -36,6 +36,14 @@ const BANNER_WIDTH = 0.9;
 const BANNER_HEIGHT = 0.3;
 const BANNER_PX = 1024;
 
+/** What the middle of the strip shows during the samurai fight. */
+export interface BossHud {
+  hp: number;
+  maxHp: number;
+  /** Fraction of his time limit left, 1 → 0. */
+  timeLeft: number;
+}
+
 let fontReady: Promise<void> | undefined;
 function loadFont(): Promise<void> {
   fontReady ??= new FontFace(FONT, `url(${shojumaruUrl})`)
@@ -158,6 +166,7 @@ export class Hud {
   private wave = -1;
   private lives = -1;
   private bannerText = '';
+  private boss: BossHud | null = null;
 
   constructor() {
     this.group.name = 'Hud';
@@ -192,6 +201,18 @@ export class Hud {
     this.drawStrip();
   }
 
+  /** Boss health and time in place of the wave; null to go back to the wave. */
+  setBoss(boss: BossHud | null): void {
+    // Quantize the timer so the strip redraws a couple of times a second, not every frame.
+    const next = boss && { ...boss, timeLeft: Math.ceil(boss.timeLeft * 60) / 60 };
+    const same =
+      next === this.boss ||
+      (next != null && this.boss != null && next.hp === this.boss.hp && next.maxHp === this.boss.maxHp && next.timeLeft === this.boss.timeLeft);
+    if (same) return;
+    this.boss = next;
+    this.drawStrip();
+  }
+
   /** Banner text and opacity (0 hides it). */
   showBanner(text: string, opacity: number): void {
     if (text !== this.bannerText) {
@@ -217,7 +238,9 @@ export class Hud {
     ctx.textAlign = 'left';
     inkText(ctx, String(Math.max(0, this.score)).padStart(6, '0'), pad, mid + height * 0.04, height * 0.62);
 
-    if (this.wave > 0) {
+    if (this.boss != null) {
+      this.drawBoss(ctx, width, height, this.boss);
+    } else if (this.wave > 0) {
       ctx.textAlign = 'right';
       inkText(ctx, 'WAVE', width / 2 + height * 0.12, mid + height * 0.04, height * 0.5);
       seal(ctx, String(this.wave), width / 2 + height * 0.62, mid, height * 0.72);
@@ -228,6 +251,36 @@ export class Hud {
       ninjaIcon(ctx, width - pad - icon * 0.62 - i * icon * 1.32, mid, icon);
     }
     texture.needsUpdate = true;
+  }
+
+  /** Health as a row of lozenges over a draining time bar. */
+  private drawBoss(ctx: CanvasRenderingContext2D, width: number, height: number, boss: BossHud): void {
+    const span = width * 0.3;
+    const left = width / 2 - span / 2;
+    const step = span / boss.maxHp;
+    const pip = Math.min(height * 0.3, step * 0.8);
+    const row = height * 0.38;
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < boss.maxHp; i++) {
+      const cx = left + step * (i + 0.5);
+      ctx.beginPath();
+      ctx.moveTo(cx, row - pip / 2);
+      ctx.lineTo(cx + pip / 2, row);
+      ctx.lineTo(cx, row + pip / 2);
+      ctx.lineTo(cx - pip / 2, row);
+      ctx.closePath();
+      ctx.lineWidth = pip * 0.22;
+      ctx.strokeStyle = INK;
+      ctx.stroke();
+      ctx.fillStyle = i < boss.hp ? VERMILION : 'rgba(18, 21, 18, 0.35)';
+      ctx.fill();
+    }
+    const barY = height * 0.74;
+    const barH = height * 0.1;
+    ctx.fillStyle = INK;
+    ctx.fillRect(left - barH * 0.4, barY - barH * 0.4, span + barH * 0.8, barH * 1.8);
+    ctx.fillStyle = boss.timeLeft < 0.25 ? VERMILION : PAPER;
+    ctx.fillRect(left, barY, span * boss.timeLeft, barH);
   }
 
   private drawBanner(): void {

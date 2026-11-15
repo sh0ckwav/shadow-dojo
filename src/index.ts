@@ -1,5 +1,6 @@
 import { World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
+import { BossSystem } from './boss-system.js';
 import { GameSystem } from './game-system.js';
 import { NinjaSystem } from './ninja-system.js';
 import { ThrowSystem } from './throw-system.js';
@@ -11,5 +12,6 @@ World.create(
   // GameSystem first: the others look it up in init().
   world.registerSystem(GameSystem);
   world.registerSystem(NinjaSystem);
+  world.registerSystem(BossSystem);
   world.registerSystem(ThrowSystem);
 });
