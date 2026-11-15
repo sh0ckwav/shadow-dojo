@@ -1,7 +1,7 @@
-import { createSystem, Entity, Object3D, Vector3, VisibilityState } from '@iwsdk/core';
+import { createSystem, Entity, Mesh, Object3D, Vector3, VisibilityState } from '@iwsdk/core';
 import { Ninja, NinjaPhase } from './game-components.js';
 import { GameSystem } from './game-system.js';
-import { NINJA_FRAMES, RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
+import { NINJA_FRAMES, ninjaFlashMaterial, RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 
 const RUN_A = NINJA_FRAMES.indexOf('RunA');
 const RUN_B = NINJA_FRAMES.indexOf('RunB');
@@ -12,7 +12,8 @@ const RUN_FPS = 8;
 const STRIKE_RANGE = 2.4;
 /** Leaps end this far in front of the face, which counts as a hit. */
 const STRIKE_DISTANCE = 0.3;
-const DEFEAT_TIME = 0.35;
+/** A struck ninja thins and stretches up into its bolt over this long. */
+const DEFEAT_TIME = 0.28;
 
 /** Sprint out of the fog → leap → strike, plus the defeat tumble. */
 export class NinjaSystem extends createSystem({
@@ -46,10 +47,12 @@ export class NinjaSystem extends createSystem({
       } else if (phase === NinjaPhase.Leaping) {
         this.leap(ninja, object, timer, time);
       } else if (phase === NinjaPhase.Defeated) {
+        // Evaporate: burn white, thin to a thread and get pulled up into the bolt.
         const u = Math.min(1, timer / DEFEAT_TIME);
-        object.scale.setScalar(Math.max(0.01, 1 - u));
-        object.rotateY(delta * 25);
-        object.position.y = Math.max(0.1, object.position.y - delta * 1.5);
+        for (const frame of object.children) (frame as Mesh).material = ninjaFlashMaterial;
+        const thin = Math.max(0.01, 1 - u * u);
+        object.scale.set(thin, 1 + u * 1.5, thin);
+        object.position.y += delta * 3 * u;
         if (u >= 1) ninja.dispose({ disposeResources: false });
       }
     }

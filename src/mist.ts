@@ -11,9 +11,13 @@ export const MIST_RAW = new Color().setRGB(...MIST_RGB, LinearSRGBColorSpace);
 /** For ordinary material colours that should land on the same display value. */
 export const MIST_SRGB = new Color().setRGB(...MIST_RGB, SRGBColorSpace);
 
+/** Blood red the mist turns when the player falls. Raw, like MIST_RAW. */
+const BLOOD_RAW = new Color().setRGB(0.6, 0.06, 0.05, LinearSRGBColorSpace);
+
 /** Shared by every misted material; GameSystem updates them per round. */
 export const mistUniforms = {
-  uMistColor: { value: MIST_RAW },
+  /** A live colour: `setMistRed()` tints it in place for every mist shader. */
+  uMistColor: { value: MIST_RAW.clone() },
   uMistCenter: { value: new Vector3() },
   /** Horizontal distance from the player where mist starts and becomes solid. */
   uMistNear: { value: 1000 },
@@ -21,6 +25,11 @@ export const mistUniforms = {
   /** Height of the mist bank's top edge. */
   uMistTop: { value: 1.9 },
 };
+
+/** Tint all mist from its natural colour (0) to blood red (1). */
+export function setMistRed(amount: number): void {
+  mistUniforms.uMistColor.value.lerpColors(MIST_RAW, BLOOD_RAW, amount);
+}
 
 /** Fade this material into the mist with horizontal distance, below the mist top. */
 export function applyMist(material: Material): void {

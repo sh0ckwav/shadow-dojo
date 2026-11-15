@@ -33,6 +33,14 @@ const bodyMaterial = new MeshStandardMaterial({
 // Runners stay hidden in the ground mist until they are close.
 applyMist(bodyMaterial);
 
+/** Swapped onto a struck ninja as it burns away into the bolt. */
+export const ninjaFlashMaterial = new MeshStandardMaterial({
+  vertexColors: true,
+  flatShading: true,
+  emissive: new Color(0xd8ccff),
+  emissiveIntensity: 1.4,
+});
+
 const j = (x: number, y: number, z: number) => new Vector3(x, y, z);
 const UP = j(0, 1, 0);
 const orienter = new Object3D();

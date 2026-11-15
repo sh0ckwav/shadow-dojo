@@ -10,6 +10,8 @@ import {
 import { BambooForest, LANE_AZIMUTHS, type WallSegment } from './bamboo-forest.js';
 import { Boss, BossPhase, Ninja, NinjaPhase } from './game-components.js';
 import { Hud, MistVeil } from './hud.js';
+import { Lightning } from './lightning.js';
+import { setMistRed } from './mist.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
 import { createSamuraiModel, SAMURAI_WAIST_HEIGHT } from './scene-assets/samurai-model.js';
@@ -52,6 +54,16 @@ const BOSS_TIME_STEP = 3;
 const BOSS_MIN_TIME = 20;
 const BOSS_HIT_SCORE = 100;
 const BOSS_DEFEAT_SCORE = 1000;
+/** Seconds of the samurai's death to show before the next transition starts. */
+const BOSS_DEATH_HOLD = 1.8;
+
+// When the player falls the mist surges over everything and turns red,
+// then sinks back to a red ring around the room under the game-over panel.
+const DEATH_RISE = [0, 0.7] as const;
+const DEATH_RED = [0.1, 1.0] as const;
+const DEATH_FALL = [2.0, 3.2] as const;
+/** After a restart the red drains back out of the mist over this long. */
+const RED_DRAIN_SECONDS = 1.5;
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
@@ -82,6 +94,8 @@ export class GameSystem extends createSystem({
   readonly environment = new BambooForest();
   readonly hud = new Hud();
   readonly veil = new MistVeil();
+  /** Death strikes, shared with BossSystem. */
+  readonly lightning = new Lightning();
 
   private toSpawn = 0;
   private spawnTimer = 0;
@@ -99,12 +113,17 @@ export class GameSystem extends createSystem({
   private time = 0;
   /** Seconds into the between-wave mist transition, or -1 when none. */
   private transition = -1;
+  /** Seconds to hold before a pending transition's mist starts rolling. */
+  private transitionDelay = 0;
   /** What the current transition leads into, and the banner announcing it. */
   private nextIsBoss = false;
   private bannerText = '';
   /** True while the samurai fight is on instead of a ninja wave. */
   private bossRound = false;
   private bossesBeaten = 0;
+  /** Seconds since the player fell, or -1. */
+  private deathTime = -1;
+  private red = 0;
   private samuraiPrototype = createSamuraiModel();
 
   private panelEntity?: ReturnType<GameSystem['world']['getSceneEntity']>;
@@ -120,6 +139,7 @@ export class GameSystem extends createSystem({
     }
     this.world.createTransformEntity(this.environment.group);
     this.environment.update(0, 0);
+    this.world.createTransformEntity(this.lightning.group);
     // Head-locked: the HUD strip, wave banner and veil ride on the camera.
     const camera = this.world.camera;
     camera.add(this.hud.group, this.veil.mesh);
@@ -170,10 +190,11 @@ export class GameSystem extends createSystem({
     }
     this.phaseTime += delta;
     this.time += delta;
+    this.lightning.update(delta);
     this.updatePanelPlacement(delta);
 
-    const revealTarget =
-      this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission ? 1 : 0;
+    // The forest stays up through game over, ringed in red mist.
+    const revealTarget = this.phase === GamePhase.Menu ? 0 : 1;
     const step = delta / REVEAL_SECONDS;
     this.reveal = revealTarget > this.reveal
       ? Math.min(revealTarget, this.reveal + step)
@@ -199,9 +220,10 @@ export class GameSystem extends createSystem({
   }
 
   /** Mist over everything, announce what comes next, then let it sink. */
-  private startTransition(toBoss: boolean): void {
+  private startTransition(toBoss: boolean, delay = 0): void {
     this.setPhase(GamePhase.Intermission);
     this.transition = 0;
+    this.transitionDelay = delay;
     this.nextIsBoss = toBoss;
     this.bannerText = toBoss ? BOSS_BANNER : `WAVE ${this.wave + 1}`;
   }
@@ -209,7 +231,9 @@ export class GameSystem extends createSystem({
   private updateTransition(delta: number): void {
     let veil = 0;
     let banner = 0;
-    if (this.transition >= 0) {
+    if (this.transitionDelay > 0) {
+      this.transitionDelay -= delta;
+    } else if (this.transition >= 0) {
       const t = (this.transition += delta);
       veil = smoothstep(VEIL_RISE[0], VEIL_RISE[1], t) * (1 - smoothstep(VEIL_FALL[0], VEIL_FALL[1], t));
       banner = smoothstep(BANNER_IN[0], BANNER_IN[1], t) * (1 - smoothstep(BANNER_OUT[0], BANNER_OUT[1], t));
@@ -219,6 +243,14 @@ export class GameSystem extends createSystem({
       }
       if (t >= VEIL_FALL[1]) this.transition = -1;
     }
+    if (this.deathTime >= 0) {
+      const t = (this.deathTime += delta);
+      veil = Math.max(veil, smoothstep(DEATH_RISE[0], DEATH_RISE[1], t) * (1 - smoothstep(DEATH_FALL[0], DEATH_FALL[1], t)));
+      this.red = Math.max(this.red, smoothstep(DEATH_RED[0], DEATH_RED[1], t));
+    } else {
+      this.red = Math.max(0, this.red - delta / RED_DRAIN_SECONDS);
+    }
+    setMistRed(this.red);
     this.environment.update(this.time, this.reveal, veil);
     this.veil.update(this.time, veil);
     this.hud.showBanner(this.bannerText, banner);
@@ -238,7 +270,8 @@ export class GameSystem extends createSystem({
     this.bossRound = false;
     this.hud.setBoss(null);
     this.refreshHud();
-    this.startTransition(false);
+    // Let his death play out in clear air before the mist rolls in.
+    this.startTransition(false, BOSS_DEATH_HOLD);
   }
 
   /** Called by BossSystem when the cut lands: every remaining life is lost. */
@@ -250,7 +283,9 @@ export class GameSystem extends createSystem({
   }
 
   /** Called by ThrowSystem. */
-  onNinjaDefeated(distanceToPlayer: number): void {
+  onNinjaDefeated(position: Vector3, distanceToPlayer: number): void {
+    // It evaporates up a single bolt of reverse lightning.
+    this.lightning.strike(position);
     // Picking one off while it's still deep in the mist pays extra.
     const bonus = distanceToPlayer > 6 ? 50 : 0;
     this.score += 100 + bonus;
@@ -288,6 +323,7 @@ export class GameSystem extends createSystem({
     this.wave = 0;
     this.bossRound = false;
     this.bossesBeaten = 0;
+    this.deathTime = -1;
     this.hud.setBoss(null);
     // A samurai left standing over the last game leaves with it.
     for (const boss of this.queries.bosses.entities) boss.dispose({ disposeResources: false });
@@ -359,6 +395,8 @@ export class GameSystem extends createSystem({
   private endGame(title = 'The shadows win'): void {
     this.setPhase(GamePhase.GameOver);
     this.transition = -1;
+    this.transitionDelay = 0;
+    this.deathTime = 0;
     this.bossRound = false;
     this.hud.setBoss(null);
     for (const ninja of this.queries.ninjas.entities) {

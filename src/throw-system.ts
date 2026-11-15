@@ -224,7 +224,7 @@ export class ThrowSystem extends createSystem({
       if (this.closest.distanceTo(target.position) < HIT_RADIUS) {
         ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
         ninja.setValue(Ninja, 'timer', 0);
-        this.game?.onNinjaDefeated(target.position.distanceTo(this.head));
+        this.game?.onNinjaDefeated(target.position, target.position.distanceTo(this.head));
         star.dispose({ disposeResources: false });
         return;
       }

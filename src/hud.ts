@@ -8,7 +8,7 @@ import {
   SRGBColorSpace,
 } from '@iwsdk/core';
 import shojumaruUrl from '@fontsource/shojumaru/files/shojumaru-latin-400-normal.woff2?url';
-import { MIST_RAW } from './mist.js';
+import { mistUniforms } from './mist.js';
 
 // Head-locked presentation layer: the arcade-style strip across the top of
 // the view, the big wave banner, and the mist veil that swallows the view
@@ -319,7 +319,8 @@ export class MistVeil {
   constructor() {
     this.material = new ShaderMaterial({
       uniforms: {
-        uColor: { value: MIST_RAW },
+        // Shares the live mist colour, so it turns red with the rest.
+        uColor: mistUniforms.uMistColor,
         uAmount: { value: 0 },
         uTime: { value: 0 },
       },

@@ -24,7 +24,11 @@ const WINDUP_TIME = 1.4;
 const STRIKE_TIME = 0.3;
 /** He stops this far from the player; the blade covers the rest. */
 const STRIKE_DISTANCE = 1.1;
-const DEFEAT_TIME = 0.9;
+/** Bolts tear out of him one after another, then he evaporates up the last. */
+const BARRAGE = 7;
+const BARRAGE_GAP = 0.16;
+const FINAL_BOLT_AT = BARRAGE * BARRAGE_GAP + 0.1;
+const DEFEAT_TIME = FINAL_BOLT_AT + 0.3;
 /** After the cut lands he holds it, then is gone, leaving the game-over panel. */
 const HOLD_AFTER_CUT = 1.2;
 const FLASH_TIME = 0.15;
@@ -43,6 +47,7 @@ export class BossSystem extends createSystem({
   private previous = new Vector3();
   private toward = new Vector3();
   private look = new Vector3();
+  private strikePoint = new Vector3();
 
   init(): void {
     this.game = this.world.getSystem(GameSystem);
@@ -72,12 +77,7 @@ export class BossSystem extends createSystem({
       } else if (phase === BossPhase.Striking) {
         this.strike(boss, object, timer, delta);
       } else if (phase === BossPhase.Defeated) {
-        const u = Math.min(1, timer / DEFEAT_TIME);
-        this.showFrame(object, SLASH);
-        object.rotateX(delta * 2.2);
-        object.position.y = Math.max(0.3, SAMURAI_WAIST_HEIGHT - u * 0.8);
-        object.scale.setScalar(Math.max(0.01, 1 - u * u));
-        if (u >= 1) boss.dispose({ disposeResources: false });
+        this.defeated(boss, object, timer, time);
       }
     }
   }
@@ -92,7 +92,9 @@ export class BossSystem extends createSystem({
     if (hp <= 0) {
       boss.setValue(Boss, 'phase', BossPhase.Defeated);
       boss.setValue(Boss, 'timer', 0);
+      boss.setValue(Boss, 'flash', DEFEAT_TIME);
       boss.getVectorView(Boss, 'velocity').fill(0);
+      this.strikeBarrage(boss);
       this.game?.onBossDefeated();
       return true;
     }
@@ -102,6 +104,36 @@ export class BossSystem extends createSystem({
     boss.setValue(Boss, 'turnIn', 2 + Math.random() * 3);
     this.game?.onBossHit();
     return true;
+  }
+
+  /** Schedule the bolts: a ragged barrage from all over his body, then a big one. */
+  private strikeBarrage(boss: Entity): void {
+    const object = boss.object3D;
+    const lightning = this.game?.lightning;
+    if (object == null || lightning == null) return;
+    for (let i = 0; i < BARRAGE; i++) {
+      this.strikePoint.set(
+        object.position.x + (Math.random() - 0.5) * 0.6,
+        object.position.y + (Math.random() - 0.4) * 0.9,
+        object.position.z + (Math.random() - 0.5) * 0.6,
+      );
+      lightning.strike(this.strikePoint, { delay: i * BARRAGE_GAP, height: 10 + Math.random() * 6, width: 1.1 });
+    }
+    this.strikePoint.copy(object.position);
+    lightning.strike(this.strikePoint, { delay: FINAL_BOLT_AT, height: 22, width: 2.2 });
+  }
+
+  /** Arms flung up, shuddering under the barrage, then pulled up the last bolt. */
+  private defeated(boss: Entity, object: Object3D, timer: number, time: number): void {
+    this.showFrame(object, RAISE);
+    this.faceHead(object);
+    object.rotateZ(Math.sin(time * 55) * 0.04);
+    object.rotateX(-Math.min(1, timer / FINAL_BOLT_AT) * 0.25);
+    const u = Math.max(0, (timer - FINAL_BOLT_AT) / (DEFEAT_TIME - FINAL_BOLT_AT));
+    const thin = Math.max(0.01, 1 - u * u);
+    object.scale.set(thin, 1 + u * 1.5, thin);
+    object.position.y = SAMURAI_WAIST_HEIGHT + u * 0.8;
+    if (u >= 1) boss.dispose({ disposeResources: false });
   }
 
   private circle(boss: Entity, object: Object3D, delta: number): void {
