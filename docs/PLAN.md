@@ -32,7 +32,7 @@ general terms. All art and audio are original. All art in the repo is procedural
 | --- | --- |
 | Hands-first, required ("can you finish without a controller?") | Point and pinch throws along the hand's target ray. Menus use hand-ray pinch. Controllers work through the same select path but are optional. |
 | Seated (the "airplane seat test", 2 ft radius) | Ninjas come to you. The only body movement is aiming plus an optional small lean to dodge, because the strike point locks at takeoff. |
-| Easy in and out (≤10 min, clean pause and resume) | Instant Start, waves of about 30 s, a game-over in 3–5 min. The simulation pauses when the session is blurred (Quest menu). |
+| Easy in and out (≤10 min, clean pause and resume) | Instant Start, waves of 8 ninjas (+2 after each samurai), each ending only when its last ninja is gone, a game-over in 3–5 min. The simulation pauses when the session is blurred (Quest menu). |
 | Passthrough must be purposeful | The forest and mist are shaped to the **detected walls** all the way around, so the real room stays visible inside them and everything above ninja height is passthrough except the sun. Ninjas finish their charge inside the real room. |
 | Holds up in untested rooms | Walls within 8 m are traced per direction; the outline is clamped to 1.2–8 m with a 3 m circle where no wall is found. Test in 3+ real rooms. |
 | FoV-aware design | Ninjas spawn within ±35° of where you face at round start. The in-round HUD is a head-locked strip about 20° up, ~66° wide. The glasses-FoV check is a stretch goal. |
@@ -72,7 +72,7 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
 - `src/flame.ts`: ninja deaths. A pooled, upright quad turned to face the player, with an S-shaped
   flame drawn in its shader in the lightning's colours. The struck ninja burns white and withers in
   place inside it.
-- When the player falls, the wall and floor mist fades to a muted red where it stands, ringing the
+- When the player falls, the wall and floor mist fades to blood red where it stands, ringing the
   game-over panel, with no surge over the view.
 - `src/hud.ts`: head-locked arcade strip across the top of the view (score digits left, wave seal
   centre, ninja-head life icons right) in the Shojumaru display face, the wave banner, and the

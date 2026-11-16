@@ -12,9 +12,7 @@ export const MIST_RAW = new Color().setRGB(...MIST_RGB, LinearSRGBColorSpace);
 export const MIST_SRGB = new Color().setRGB(...MIST_RGB, SRGBColorSpace);
 
 /** Blood red the mist turns when the player falls. Raw, like MIST_RAW. */
-/** The game-over mist only leans toward red, keeping some of its grey. */
-const RED_STRENGTH = 0.7;
-const BLOOD_RAW = new Color().setRGB(0.42, 0.07, 0.06, LinearSRGBColorSpace);
+const BLOOD_RAW = new Color().setRGB(0.6, 0.06, 0.05, LinearSRGBColorSpace);
 
 /** Shared by every misted material; GameSystem updates them per round. */
 export const mistUniforms = {
@@ -30,7 +28,7 @@ export const mistUniforms = {
 
 /** Tint all mist from its natural colour (0) to blood red (1). */
 export function setMistRed(amount: number): void {
-  mistUniforms.uMistColor.value.lerpColors(MIST_RAW, BLOOD_RAW, amount * RED_STRENGTH);
+  mistUniforms.uMistColor.value.lerpColors(MIST_RAW, BLOOD_RAW, amount);
 }
 
 /** Fade this material into the mist with horizontal distance, below the mist top. */

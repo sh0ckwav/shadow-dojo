@@ -57,6 +57,9 @@ const BOSS_HIT_SCORE = 100;
 const BOSS_DEFEAT_SCORE = 1000;
 /** Seconds of the samurai's death to show before the next transition starts. */
 const BOSS_DEATH_HOLD = 1.8;
+/** Ninjas to clear per wave, plus more after each samurai falls. */
+const WAVE_SIZE = 8;
+const WAVE_SIZE_STEP = 2;
 
 // When the player falls the wall mist bleeds red where it stands, ringing
 // the game-over panel; no surge over the view.
@@ -213,13 +216,15 @@ export class GameSystem extends createSystem({
     }
 
     this.spawnTimer -= delta;
-    const alive = this.queries.ninjas.entities.size;
-    if (this.toSpawn > 0 && this.spawnTimer <= 0 && alive < this.maxConcurrent()) {
+    if (this.toSpawn > 0 && this.spawnTimer <= 0 && this.queries.ninjas.entities.size < this.maxConcurrent()) {
       this.spawnNinja();
       this.toSpawn--;
       this.spawnTimer = Math.max(0.5, 1.6 - this.wave * 0.12) * (0.7 + Math.random() * 0.6);
+      // Never end the wave on the frame its last ninja appears.
+      return;
     }
-    if (this.toSpawn === 0 && alive === 0) {
+    // The wave is over only once its last ninja is gone.
+    if (this.toSpawn === 0 && this.queries.ninjas.entities.size === 0) {
       this.startTransition(this.wave % BOSS_EVERY === 0);
     }
   }
@@ -344,7 +349,7 @@ export class GameSystem extends createSystem({
 
   private beginWave(wave: number): void {
     this.wave = wave;
-    this.toSpawn = 3 + wave * 2;
+    this.toSpawn = WAVE_SIZE + this.bossesBeaten * WAVE_SIZE_STEP;
     this.spawnTimer = FIRST_SPAWN_DELAY;
     this.setPhase(GamePhase.Playing);
     this.refreshHud();
