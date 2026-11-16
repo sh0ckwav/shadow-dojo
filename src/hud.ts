@@ -15,10 +15,10 @@ import { mistUniforms } from './mist.js';
 // between waves. Everything here is a child of the camera.
 
 const FONT = 'Shojumaru';
-const FONT_STACK = `"${FONT}", "Times New Roman", serif`;
-const INK = '#121512';
-const PAPER = '#f2e6c4';
-const VERMILION = '#c8402a';
+export const FONT_STACK = `"${FONT}", "Times New Roman", serif`;
+export const INK = '#121512';
+export const PAPER = '#f2e6c4';
+export const VERMILION = '#c8402a';
 // The faceted ninja's palette (see ninja-model.ts), for the life icons.
 const GI = '#a3b2a6';
 const GI_SHADE = '#84938a';
@@ -45,7 +45,7 @@ export interface BossHud {
 }
 
 let fontReady: Promise<void> | undefined;
-function loadFont(): Promise<void> {
+export function loadFont(): Promise<void> {
   fontReady ??= new FontFace(FONT, `url(${shojumaruUrl})`)
     .load()
     .then((face) => {
@@ -57,7 +57,7 @@ function loadFont(): Promise<void> {
   return fontReady;
 }
 
-function overlayMaterial(texture: CanvasTexture): MeshBasicMaterial {
+export function overlayMaterial(texture: CanvasTexture): MeshBasicMaterial {
   return new MeshBasicMaterial({
     map: texture,
     transparent: true,
@@ -68,7 +68,7 @@ function overlayMaterial(texture: CanvasTexture): MeshBasicMaterial {
   });
 }
 
-function canvasTexture(width: number, height: number): { ctx: CanvasRenderingContext2D; texture: CanvasTexture } {
+export function canvasTexture(width: number, height: number): { ctx: CanvasRenderingContext2D; texture: CanvasTexture } {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -81,7 +81,7 @@ function canvasTexture(width: number, height: number): { ctx: CanvasRenderingCon
 }
 
 /** Paper-filled text with a heavy ink edge, readable on any passthrough. */
-function inkText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, fill = PAPER): void {
+export function inkText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, size: number, fill = PAPER): void {
   ctx.font = `${size}px ${FONT_STACK}`;
   ctx.lineJoin = 'round';
   ctx.lineWidth = size * 0.16;
@@ -92,7 +92,7 @@ function inkText(ctx: CanvasRenderingContext2D, text: string, x: number, y: numb
 }
 
 /** A hanko-style seal: vermilion square with the numeral cut out in paper. */
-function seal(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, size: number): void {
+export function seal(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, size: number): void {
   const half = size / 2;
   ctx.save();
   ctx.translate(cx, cy);
@@ -114,7 +114,7 @@ function seal(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: numbe
 }
 
 /** Faceted ninja head: sage hood, dark mask window, paper eyes, violet tails. */
-function ninjaIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
+export function ninjaIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
   const s = size / 2;
   const at = (x: number, y: number): [number, number] => [cx + x * s, cy + y * s];
   const poly = (points: Array<[number, number]>, fill: string) => {

@@ -1,8 +1,10 @@
 import {
   createSystem,
+  Entity,
+  Hovered,
   Matrix4,
-  UIKit,
-  UIKitMLAsset,
+  Pressed,
+  RayInteractable,
   Vector3,
   VisibilityState,
   XRPlane,
@@ -12,6 +14,7 @@ import { Boss, BossPhase, Ninja, NinjaPhase } from './game-components.js';
 import { Hud, MistVeil } from './hud.js';
 import { Flames } from './flame.js';
 import { Lightning } from './lightning.js';
+import { MenuButton, MenuCard } from './menu-card.js';
 import { setMistRed } from './mist.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
@@ -57,9 +60,6 @@ const BOSS_HIT_SCORE = 100;
 const BOSS_DEFEAT_SCORE = 1000;
 /** Seconds of the samurai's death to show before the next transition starts. */
 const BOSS_DEATH_HOLD = 1.8;
-/** Ninjas to clear per wave, plus more after each samurai falls. */
-const WAVE_SIZE = 8;
-const WAVE_SIZE_STEP = 2;
 
 // When the player falls the wall mist bleeds red where it stands, ringing
 // the game-over panel; no surge over the view.
@@ -85,6 +85,7 @@ export class GameSystem extends createSystem({
   planes: { required: [XRPlane] },
   ninjas: { required: [Ninja] },
   bosses: { required: [Boss] },
+  pressed: { required: [RayInteractable, Pressed] },
 }) {
   phase: GamePhase = GamePhase.Menu;
   score = 0;
@@ -131,10 +132,11 @@ export class GameSystem extends createSystem({
   private red = 0;
   private samuraiPrototype = createSamuraiModel();
 
-  private panelEntity?: ReturnType<GameSystem['world']['getSceneEntity']>;
-  private titleText?: UIKit.Text;
-  private statusText?: UIKit.Text;
-  private startButton?: ReturnType<UIKitMLAsset['getElementById']>;
+  /** Title and game-over card, drawn to match the HUD. */
+  private menu = new MenuCard();
+  private menuButtons = new Map<Entity, MenuButton>();
+  /** Lane index of the last ninja spawned, so the next comes from elsewhere. */
+  private lastLane = -1;
 
   init(): void {
     try {
@@ -153,30 +155,26 @@ export class GameSystem extends createSystem({
     // Passthrough stays clear above the mist: no scene-wide fog.
     this.world.scene.fog = null;
 
-    const panel = this.world.getSceneObject<UIKitMLAsset>('hud-panel');
-    this.panelEntity = this.world.getSceneEntity('hud-panel');
-    if (panel != null) {
-      this.titleText = panel.getElementById<UIKit.Text>('title') ?? undefined;
-      this.statusText = panel.getElementById<UIKit.Text>('status') ?? undefined;
-      this.startButton = panel.getElementById('start-button') ?? undefined;
-      const xrButton = panel.getElementById('xr-button');
-      const onStart = () => this.startGame();
-      const onEnterXR = () => this.world.launchXR();
-      this.startButton?.addEventListener('click', onStart);
-      xrButton?.addEventListener('click', onEnterXR);
-      this.cleanupFuncs.push(
-        () => this.startButton?.removeEventListener('click', onStart),
-        () => xrButton?.removeEventListener('click', onEnterXR),
-        this.world.visibilityState.subscribe((state) => {
-          const is2D = state === VisibilityState.NonImmersive;
-          xrButton?.setProperties({
-            display: is2D && this.world.xrEnabled ? 'flex' : 'none',
-          });
-          // The XR head pose lands a few frames after the session starts.
-          if (!is2D) this.panelPlacementDelay = 0.3;
-        }),
-      );
+    const menuEntity = this.world.createTransformEntity(this.menu.group);
+    for (const button of [this.menu.start, this.menu.enterXR]) {
+      const entity = this.world.createTransformEntity(button.mesh, { parent: menuEntity });
+      entity.addComponent(RayInteractable);
+      this.menuButtons.set(entity, button);
     }
+    this.queries.pressed.subscribe('qualify', (entity) => {
+      const button = this.menuButtons.get(entity);
+      if (button == null || !button.visible || !this.menu.group.visible) return;
+      if (button === this.menu.start) this.startGame();
+      else this.world.launchXR();
+    });
+    this.cleanupFuncs.push(
+      this.world.visibilityState.subscribe((state) => {
+        const is2D = state === VisibilityState.NonImmersive;
+        this.menu.setEnterVisible(is2D && this.world.xrEnabled);
+        // The XR head pose lands a few frames after the session starts.
+        if (!is2D) this.panelPlacementDelay = 0.3;
+      }),
+    );
     if (import.meta.env.DEV) {
       // Dev-only: B during a ninja wave skips straight to the samurai.
       const onKey = (event: KeyboardEvent) => {
@@ -200,6 +198,7 @@ export class GameSystem extends createSystem({
     this.world.camera.getWorldPosition(this.head);
     this.flames.update(delta, this.head);
     this.updatePanelPlacement(delta);
+    for (const [entity, button] of this.menuButtons) button.setHovered(entity.hasComponent(Hovered));
 
     // The forest stays up through game over, ringed in red mist.
     const revealTarget = this.phase === GamePhase.Menu ? 0 : 1;
@@ -343,13 +342,11 @@ export class GameSystem extends createSystem({
     this.refreshHud();
     this.setPanelVisible(false);
     this.hud.setVisible(true);
-    this.startButton?.setProperties({ display: 'none' });
-    this.titleText?.setProperties({ display: 'none' });
   }
 
   private beginWave(wave: number): void {
     this.wave = wave;
-    this.toSpawn = WAVE_SIZE + this.bossesBeaten * WAVE_SIZE_STEP;
+    this.toSpawn = 3 + wave * 2;
     this.spawnTimer = FIRST_SPAWN_DELAY;
     this.setPhase(GamePhase.Playing);
     this.refreshHud();
@@ -413,7 +410,8 @@ export class GameSystem extends createSystem({
       ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
       ninja.setValue(Ninja, 'timer', 0);
     }
-    if (this.score > this.best) {
+    const newBest = this.score > this.best;
+    if (newBest) {
       this.best = this.score;
       try {
         localStorage.setItem(BEST_SCORE_KEY, String(this.best));
@@ -421,16 +419,16 @@ export class GameSystem extends createSystem({
         // Storage can be unavailable in private sessions; the best score is a nicety.
       }
     }
-    this.setStatus(`Score ${this.score} on wave ${this.wave}. Best ${this.best}`);
-    this.titleText?.setProperties({ display: 'flex', text: title });
-    this.startButton?.setProperties({ display: 'flex' });
+    this.menu.show({ kind: 'over', title, score: this.score, wave: this.wave, best: this.best, newBest });
     this.setPanelVisible(true);
     this.placePanel(0.85, -0.12);
   }
 
   private showMenu(): void {
     this.setPhase(GamePhase.Menu);
-    this.setStatus('Shadows gather in the bamboo around you. Point and pinch to throw.');
+    this.menu.show({ kind: 'title', best: this.best });
+    this.setPanelVisible(true);
+    this.placePanel(0.85, -0.12);
     this.refreshHud();
   }
 
@@ -439,18 +437,13 @@ export class GameSystem extends createSystem({
     this.phaseTime = 0;
   }
 
-  private setStatus(text: string): void {
-    this.statusText?.setProperties({ text });
-  }
-
   private refreshHud(): void {
     this.hud.set(this.score, this.wave, this.lives);
   }
 
   /** The menu panel is only for menus; the round uses the head-locked HUD. */
   private setPanelVisible(visible: boolean): void {
-    const object = this.panelEntity?.object3D;
-    if (object != null) object.visible = visible;
+    this.menu.group.visible = visible;
   }
 
   private updatePanelPlacement(delta: number): void {
@@ -462,8 +455,7 @@ export class GameSystem extends createSystem({
 
   /** Put the panel in front of the head, `down` meters below eye level, facing it. */
   private placePanel(distance: number, down: number): void {
-    const object = this.panelEntity?.object3D;
-    if (object == null) return;
+    const object = this.menu.group;
     this.readHead();
     object.position.copy(this.head).addScaledVector(this.forward, distance);
     object.position.y += down;
@@ -530,7 +522,12 @@ export class GameSystem extends createSystem({
   private spawnNinja(): void {
     this.readHead();
     // Come down one of the paths kept clear through the bamboo.
-    const lane = LANE_AZIMUTHS[Math.floor(Math.random() * LANE_AZIMUTHS.length)];
+    // Never the same lane twice running.
+    const choices = this.lastLane < 0 ? LANE_AZIMUTHS.length : LANE_AZIMUTHS.length - 1;
+    let index = Math.floor(Math.random() * choices);
+    if (this.lastLane >= 0 && index >= this.lastLane) index++;
+    this.lastLane = index;
+    const lane = LANE_AZIMUTHS[index];
     const azimuth = lane + (Math.random() - 0.5) * 0.02;
     const radius = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
     this.environment.pointAt(azimuth, radius, this.point).setY(RUN_WAIST_HEIGHT);

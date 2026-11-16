@@ -80,7 +80,9 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
   back to the walls.
 - `src/mist.ts`: a shader patch shared by the ninjas and bamboo that sinks anything below ninja height
   into the mist colour once it is past the walls.
-- `public/ui/hud.uikitml`: menu and game-over panel (hidden during a round).
+- `src/menu-card.ts`: title and game-over card drawn like the HUD (Shojumaru, ink-edged paper
+  lettering, wave seal, ninja head) on a lacquered ink plaque, with vermilion plaque buttons that are
+  `RayInteractable` entities (pinch or click). Hidden during a round.
 - `.github/workflows/deploy.yml`: typecheck, build and deploy to GitHub Pages on push to `main`.
 
 Emulator checks that passed: the panel appears in front of the player on entering XR, pinching Begin
