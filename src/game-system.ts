@@ -10,6 +10,7 @@ import {
 import { BambooForest, LANE_AZIMUTHS, type WallSegment } from './bamboo-forest.js';
 import { Boss, BossPhase, Ninja, NinjaPhase } from './game-components.js';
 import { Hud, MistVeil } from './hud.js';
+import { Flames } from './flame.js';
 import { Lightning } from './lightning.js';
 import { setMistRed } from './mist.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
@@ -57,11 +58,9 @@ const BOSS_DEFEAT_SCORE = 1000;
 /** Seconds of the samurai's death to show before the next transition starts. */
 const BOSS_DEATH_HOLD = 1.8;
 
-// When the player falls the mist surges over everything and turns red,
-// then sinks back to a red ring around the room under the game-over panel.
-const DEATH_RISE = [0, 0.7] as const;
-const DEATH_RED = [0.1, 1.0] as const;
-const DEATH_FALL = [2.0, 3.2] as const;
+// When the player falls the wall mist bleeds red where it stands, ringing
+// the game-over panel; no surge over the view.
+const DEATH_RED = [0, 1.2] as const;
 /** After a restart the red drains back out of the mist over this long. */
 const RED_DRAIN_SECONDS = 1.5;
 
@@ -96,6 +95,9 @@ export class GameSystem extends createSystem({
   readonly veil = new MistVeil();
   /** Death strikes, shared with BossSystem. */
   readonly lightning = new Lightning();
+  /** Ninja death flames. */
+  private flames = new Flames();
+  private flameBase = new Vector3();
 
   private toSpawn = 0;
   private spawnTimer = 0;
@@ -140,6 +142,7 @@ export class GameSystem extends createSystem({
     this.world.createTransformEntity(this.environment.group);
     this.environment.update(0, 0);
     this.world.createTransformEntity(this.lightning.group);
+    this.world.createTransformEntity(this.flames.group);
     // Head-locked: the HUD strip, wave banner and veil ride on the camera.
     const camera = this.world.camera;
     camera.add(this.hud.group, this.veil.mesh);
@@ -191,6 +194,8 @@ export class GameSystem extends createSystem({
     this.phaseTime += delta;
     this.time += delta;
     this.lightning.update(delta);
+    this.world.camera.getWorldPosition(this.head);
+    this.flames.update(delta, this.head);
     this.updatePanelPlacement(delta);
 
     // The forest stays up through game over, ringed in red mist.
@@ -245,7 +250,6 @@ export class GameSystem extends createSystem({
     }
     if (this.deathTime >= 0) {
       const t = (this.deathTime += delta);
-      veil = Math.max(veil, smoothstep(DEATH_RISE[0], DEATH_RISE[1], t) * (1 - smoothstep(DEATH_FALL[0], DEATH_FALL[1], t)));
       this.red = Math.max(this.red, smoothstep(DEATH_RED[0], DEATH_RED[1], t));
     } else {
       this.red = Math.max(0, this.red - delta / RED_DRAIN_SECONDS);
@@ -284,8 +288,9 @@ export class GameSystem extends createSystem({
 
   /** Called by ThrowSystem. */
   onNinjaDefeated(position: Vector3, distanceToPlayer: number): void {
-    // It evaporates up a single bolt of reverse lightning.
-    this.lightning.strike(position);
+    // It evaporates where it stands into an S of spirit flame.
+    this.flameBase.set(position.x, Math.max(0, position.y - RUN_WAIST_HEIGHT), position.z);
+    this.flames.ignite(this.flameBase);
     // Picking one off while it's still deep in the mist pays extra.
     const bonus = distanceToPlayer > 6 ? 50 : 0;
     this.score += 100 + bonus;

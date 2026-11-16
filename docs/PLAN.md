@@ -65,12 +65,15 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
   player at about the room radius, reverses and speeds up when hit, needs 8 hits (+2 per later boss),
   and after 30 s (−3 s per later boss, min 20 s) winds up for 1.4 s and cuts: all lives lost. Throws
   get a 15° aim assist on him. In dev builds, B during a ninja wave skips to him.
-- `src/lightning.ts`: death strikes. A pooled, allocation-free reverse lightning bolt (crossed-ribbon
-  geometry, white core with a violet edge so it reads on bright ceilings) that climbs from the body
-  into the sky. A struck ninja burns white and is pulled up one bolt; the samurai shudders under a
-  barrage of seven, then evaporates up a final heavy bolt before the next wave's mist rolls in. When
-  the player falls, the mist surges over everything and turns blood red, then sinks back to a red ring
-  around the room behind the game-over panel.
+- `src/lightning.ts`: the samurai's death. A pooled, allocation-free reverse lightning bolt
+  (crossed-ribbon geometry, white core with a violet edge so it reads on bright ceilings) that climbs
+  from the body into the sky. He shudders under a barrage of seven, then evaporates up a final heavy
+  bolt before the next wave's mist rolls in.
+- `src/flame.ts`: ninja deaths. A pooled, upright quad turned to face the player, with an S-shaped
+  flame drawn in its shader in the lightning's colours. The struck ninja burns white and withers in
+  place inside it.
+- When the player falls, the wall and floor mist fades to a muted red where it stands, ringing the
+  game-over panel, with no surge over the view.
 - `src/hud.ts`: head-locked arcade strip across the top of the view (score digits left, wave seal
   centre, ninja-head life icons right) in the Shojumaru display face, the wave banner, and the
   full-view mist veil. Between waves the mist rolls over everything, announces the next wave, then sinks

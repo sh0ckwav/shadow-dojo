@@ -12,8 +12,8 @@ const RUN_FPS = 8;
 const STRIKE_RANGE = 2.4;
 /** Leaps end this far in front of the face, which counts as a hit. */
 const STRIKE_DISTANCE = 0.3;
-/** A struck ninja thins and stretches up into its bolt over this long. */
-const DEFEAT_TIME = 0.28;
+/** A struck ninja burns away inside its flame over this long. */
+const DEFEAT_TIME = 0.35;
 
 /** Sprint out of the fog → leap → strike, plus the defeat tumble. */
 export class NinjaSystem extends createSystem({
@@ -47,12 +47,11 @@ export class NinjaSystem extends createSystem({
       } else if (phase === NinjaPhase.Leaping) {
         this.leap(ninja, object, timer, time);
       } else if (phase === NinjaPhase.Defeated) {
-        // Evaporate: burn white, thin to a thread and get pulled up into the bolt.
+        // Evaporate in place: burn white and wither to a thread inside the flame.
         const u = Math.min(1, timer / DEFEAT_TIME);
         for (const frame of object.children) (frame as Mesh).material = ninjaFlashMaterial;
         const thin = Math.max(0.01, 1 - u * u);
-        object.scale.set(thin, 1 + u * 1.5, thin);
-        object.position.y += delta * 3 * u;
+        object.scale.set(thin, 1 + u * 0.3, thin);
         if (u >= 1) ninja.dispose({ disposeResources: false });
       }
     }
