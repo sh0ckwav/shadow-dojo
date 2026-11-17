@@ -21,7 +21,7 @@ import {
 const CARD_WIDTH = 0.6;
 const CARD_HEIGHT = 0.34;
 const CARD_PX = 1024;
-const BUTTON_WIDTH = 0.22;
+const BUTTON_WIDTH = 0.19;
 const BUTTON_HEIGHT = 0.07;
 const BUTTON_PX = 512;
 const BUTTON_GAP = 0.025;
@@ -32,8 +32,31 @@ const LACQUER = 'rgba(18, 21, 18, 0.86)';
 const VERMILION_LIT = '#e0583c';
 
 export type MenuScreen =
-  | { kind: 'title'; best: number }
-  | { kind: 'over'; title: string; score: number; wave: number; best: number; newBest: boolean };
+  | { kind: 'title'; best: number; dailyBest: number; noWalls: boolean }
+  | {
+      kind: 'over';
+      title: string;
+      score: number;
+      wave: number;
+      best: number;
+      newBest: boolean;
+      daily: boolean;
+    };
+
+/** Score thresholds for the end-of-run rank, lowest first. */
+const RANKS: Array<[number, string]> = [
+  [0, 'NOVICE'],
+  [1500, 'STUDENT'],
+  [4000, 'ADEPT'],
+  [8000, 'MASTER'],
+  [15000, 'SHADOW MASTER'],
+];
+
+export function rankFor(score: number): string {
+  let rank = RANKS[0][1];
+  for (const [min, name] of RANKS) if (score >= min) rank = name;
+  return rank;
+}
 
 export class MenuButton {
   readonly mesh: Mesh;
@@ -95,9 +118,13 @@ export class MenuButton {
 export class MenuCard {
   readonly group = new Group();
   readonly start = new MenuButton('BEGIN');
+  readonly daily = new MenuButton('DAILY');
   readonly enterXR = new MenuButton('ENTER');
+  readonly scan = new MenuButton('SCAN');
+  /** Left to right, as they hang under the card. */
+  private readonly row = [this.enterXR, this.scan, this.start, this.daily];
   private card: { ctx: CanvasRenderingContext2D; texture: CanvasTexture };
-  private screen: MenuScreen = { kind: 'title', best: 0 };
+  private screen: MenuScreen = { kind: 'title', best: 0, dailyBest: 0, noWalls: false };
 
   constructor() {
     this.group.name = 'MenuCard';
@@ -106,17 +133,19 @@ export class MenuCard {
     cardMesh.renderOrder = 1010;
     cardMesh.frustumCulled = false;
     this.group.add(cardMesh);
+    this.scan.visible = false;
     this.layoutButtons();
     void loadFont().then(() => {
       this.draw();
-      this.start.draw();
-      this.enterXR.draw();
+      for (const button of this.row) button.draw();
     });
   }
 
   show(screen: MenuScreen): void {
     this.screen = screen;
     this.start.setLabel(screen.kind === 'title' ? 'BEGIN' : 'AGAIN');
+    this.scan.visible = screen.kind === 'title' && screen.noWalls;
+    this.layoutButtons();
     this.draw();
   }
 
@@ -126,13 +155,14 @@ export class MenuCard {
     this.layoutButtons();
   }
 
-  /** Buttons hang in a row just under the card. */
+  /** Visible buttons hang in a centred row just under the card. */
   private layoutButtons(): void {
     const y = -CARD_HEIGHT / 2 - BUTTON_GAP - BUTTON_HEIGHT / 2;
-    const both = this.enterXR.visible;
-    const offset = both ? (BUTTON_WIDTH + BUTTON_GAP) / 2 : 0;
-    this.enterXR.mesh.position.set(-offset, y, 0.002);
-    this.start.mesh.position.set(offset, y, 0.002);
+    const shown = this.row.filter((b) => b.visible);
+    const span = shown.length * BUTTON_WIDTH + (shown.length - 1) * BUTTON_GAP;
+    shown.forEach((button, i) => {
+      button.mesh.position.set(-span / 2 + BUTTON_WIDTH / 2 + i * (BUTTON_WIDTH + BUTTON_GAP), y, 0.002);
+    });
   }
 
   private draw(): void {
@@ -141,7 +171,7 @@ export class MenuCard {
     ctx.clearRect(0, 0, width, height);
     this.plaque(ctx, width, height);
     ctx.textBaseline = 'middle';
-    if (this.screen.kind === 'title') this.drawTitle(ctx, width, height, this.screen.best);
+    if (this.screen.kind === 'title') this.drawTitle(ctx, width, height, this.screen);
     else this.drawOver(ctx, width, height, this.screen);
     texture.needsUpdate = true;
   }
@@ -163,7 +193,12 @@ export class MenuCard {
     ctx.globalAlpha = 1;
   }
 
-  private drawTitle(ctx: CanvasRenderingContext2D, width: number, height: number, best: number): void {
+  private drawTitle(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    { best, dailyBest, noWalls }: Extract<MenuScreen, { kind: 'title' }>,
+  ): void {
     // A ninja head beside the name, like a life icon grown up.
     const icon = height * 0.2;
     ctx.textAlign = 'left';
@@ -180,10 +215,16 @@ export class MenuCard {
 
     ctx.textAlign = 'center';
     inkText(ctx, 'SHADOWS GATHER IN THE BAMBOO', width / 2, height * 0.6, height * 0.075);
-    inkText(ctx, 'POINT AND PINCH TO THROW', width / 2, height * 0.715, height * 0.075);
-    if (best > 0) {
-      inkText(ctx, `BEST ${String(best).padStart(6, '0')}`, width / 2, height * 0.86, height * 0.07, VERMILION_LIT);
+    if (noWalls) {
+      // No walls found: the forest falls back to a small circle until the room is scanned.
+      inkText(ctx, 'NO WALLS FOUND: SCAN YOUR ROOM', width / 2, height * 0.715, height * 0.075, VERMILION_LIT);
+    } else {
+      inkText(ctx, 'POINT AND PINCH TO THROW', width / 2, height * 0.715, height * 0.075);
     }
+    const scores: string[] = [];
+    if (best > 0) scores.push(`BEST ${String(best).padStart(6, '0')}`);
+    if (dailyBest > 0) scores.push(`DAILY ${String(dailyBest).padStart(6, '0')}`);
+    if (scores.length > 0) inkText(ctx, scores.join('   '), width / 2, height * 0.86, height * 0.07, VERMILION_LIT);
   }
 
   private drawOver(
@@ -199,18 +240,43 @@ export class MenuCard {
     ctx.font = `${size}px ${FONT_STACK}`;
     const fit = (width * 0.86) / ctx.measureText(title).width;
     if (fit < 1) size *= fit;
-    inkText(ctx, title, width / 2, height * 0.22, size);
-    this.brushRule(ctx, width, height * 0.36);
+    inkText(ctx, title, width / 2, height * 0.18, size);
+    this.brushRule(ctx, width, height * 0.3);
 
     // Score in the HUD's six digits, the wave reached on its seal.
-    inkText(ctx, String(screen.score).padStart(6, '0'), width * 0.33, height * 0.57, height * 0.15);
+    inkText(ctx, String(screen.score).padStart(6, '0'), width * 0.33, height * 0.48, height * 0.15);
     ctx.textAlign = 'right';
-    inkText(ctx, 'WAVE', width * 0.79, height * 0.58, height * 0.075);
-    seal(ctx, String(screen.wave), width * 0.87, height * 0.57, height * 0.15);
+    inkText(ctx, 'WAVE', width * 0.79, height * 0.49, height * 0.075);
+    seal(ctx, String(screen.wave), width * 0.87, height * 0.48, height * 0.15);
+
+    // The rank, stamped in vermilion.
+    this.rankStamp(ctx, width / 2, height * 0.69, height * 0.12, rankFor(screen.score));
 
     ctx.textAlign = 'center';
-    const best = `BEST ${String(screen.best).padStart(6, '0')}`;
-    inkText(ctx, screen.newBest ? `NEW ${best}` : best, width / 2, height * 0.83, height * 0.075, screen.newBest ? VERMILION_LIT : PAPER);
+    const best = `${screen.daily ? 'DAILY BEST' : 'BEST'} ${String(screen.best).padStart(6, '0')}`;
+    inkText(ctx, screen.newBest ? `NEW ${best}` : best, width / 2, height * 0.88, height * 0.065, screen.newBest ? VERMILION_LIT : PAPER);
+  }
+
+  /** A hanko-style rectangular stamp with the rank cut out in paper. */
+  private rankStamp(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, rank: string): void {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-0.03);
+    ctx.font = `${size * 0.7}px ${FONT_STACK}`;
+    const w = ctx.measureText(rank).width + size * 1.2;
+    const h = size * 1.25;
+    ctx.fillStyle = INK;
+    ctx.fillRect(-w / 2 - size * 0.08, -h / 2 - size * 0.08, w + size * 0.16, h + size * 0.16);
+    ctx.fillStyle = VERMILION;
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.strokeStyle = PAPER;
+    ctx.lineWidth = size * 0.06;
+    ctx.strokeRect(-w / 2 + size * 0.14, -h / 2 + size * 0.14, w - size * 0.28, h - size * 0.28);
+    ctx.fillStyle = PAPER;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(rank, 0, size * 0.05);
+    ctx.restore();
   }
 
   /** A brush stroke rule: thick in the middle, tapering to points. */

@@ -112,6 +112,7 @@ export class ThrowSystem extends createSystem({
   }
 
   private throwStar(): void {
+    this.game?.audio.throwStar();
     this.applyAimAssist();
     const object = this.prototype.clone();
     object.position.copy(this.origin).addScaledVector(this.direction, 0.12);
@@ -197,6 +198,7 @@ export class ThrowSystem extends createSystem({
     if (object == null) return;
     const life = (star.getValue(Shuriken, 'life') ?? 0) - delta;
     if (life <= 0) {
+      this.game?.onStarMissed();
       star.dispose({ disposeResources: false });
       return;
     }

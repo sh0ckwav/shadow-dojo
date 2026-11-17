@@ -95,13 +95,21 @@ export class BossSystem extends createSystem({
       boss.setValue(Boss, 'flash', DEFEAT_TIME);
       boss.getVectorView(Boss, 'velocity').fill(0);
       this.strikeBarrage(boss);
+      if (boss.object3D != null) {
+        this.game?.audio.armorHit(boss.object3D.position);
+        this.game?.audio.samuraiDeath(boss.object3D);
+      }
       this.game?.onBossDefeated();
       return true;
     }
     // Stung: reverse and quicken.
     const spin = boss.getValue(Boss, 'spin') ?? 0.7;
     boss.setValue(Boss, 'spin', -Math.sign(spin) * (Math.abs(spin) + SPIN_PER_HIT));
-    boss.setValue(Boss, 'turnIn', 2 + Math.random() * 3);
+    boss.setValue(Boss, 'turnIn', 2 + (this.game?.random() ?? Math.random()) * 3);
+    if (boss.object3D != null) {
+      this.game?.audio.armorHit(boss.object3D.position);
+      this.game?.audio.samuraiGrunt(boss.object3D);
+    }
     this.game?.onBossHit();
     return true;
   }
@@ -118,9 +126,11 @@ export class BossSystem extends createSystem({
         object.position.z + (Math.random() - 0.5) * 0.6,
       );
       lightning.strike(this.strikePoint, { delay: i * BARRAGE_GAP, height: 10 + Math.random() * 6, width: 1.1 });
+      this.game?.audio.lightning(this.strikePoint, 0.7, i * BARRAGE_GAP);
     }
     this.strikePoint.copy(object.position);
     lightning.strike(this.strikePoint, { delay: FINAL_BOLT_AT, height: 22, width: 2.2 });
+    this.game?.audio.lightning(this.strikePoint, 1.6, FINAL_BOLT_AT);
   }
 
   /** Arms flung up, shuddering under the barrage, then pulled up the last bolt. */
@@ -145,7 +155,7 @@ export class BossSystem extends createSystem({
     if (turnIn <= 0) {
       spin = -spin;
       boss.setValue(Boss, 'spin', spin);
-      boss.setValue(Boss, 'turnIn', 2.5 + Math.random() * 3);
+      boss.setValue(Boss, 'turnIn', 2.5 + (this.game?.random() ?? Math.random()) * 3);
     } else {
       boss.setValue(Boss, 'turnIn', turnIn);
     }
@@ -178,6 +188,7 @@ export class BossSystem extends createSystem({
       boss.setValue(Boss, 'timer', 0);
       v.fill(0);
       this.showFrame(object, RAISE);
+      this.game?.audio.samuraiWindup(object);
     }
   }
 
@@ -195,6 +206,7 @@ export class BossSystem extends createSystem({
     boss.setValue(Boss, 'phase', BossPhase.Striking);
     boss.setValue(Boss, 'timer', 0);
     this.showFrame(object, SLASH);
+    this.game?.audio.samuraiStrike(object);
   }
 
   private strike(boss: Entity, object: Object3D, timer: number, delta: number): void {

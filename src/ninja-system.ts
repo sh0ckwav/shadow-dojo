@@ -63,6 +63,15 @@ export class NinjaSystem extends createSystem({
     const remaining = this.toward.length();
     this.toward.divideScalar(Math.max(remaining, 1e-4));
     const speed = ninja.getValue(Ninja, 'speed') ?? 12;
+    if (ninja.getValue(Ninja, 'practice')) {
+      // The practice target walks in, then stands its ground facing you.
+      if (remaining > 0.02) object.position.addScaledVector(this.toward, Math.min(remaining, speed * delta));
+      this.showFrame(object, remaining > 0.02 && Math.floor(timer * 4) % 2 === 0 ? RUN_B : RUN_A);
+      object.position.y = RUN_WAIST_HEIGHT;
+      this.origin.set(this.head.x, object.position.y, this.head.z);
+      object.lookAt(this.origin);
+      return;
+    }
     object.position.addScaledVector(this.toward, Math.min(remaining, speed * delta));
 
     // Two held key frames with a hop on the contact frame; no tweening.
@@ -84,6 +93,7 @@ export class NinjaSystem extends createSystem({
       ninja.setValue(Ninja, 'phase', NinjaPhase.Leaping);
       ninja.setValue(Ninja, 'timer', 0);
       this.showFrame(object, LEAP);
+      this.game?.audio.leap(object.position);
     }
   }
 

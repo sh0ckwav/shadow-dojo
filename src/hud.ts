@@ -165,6 +165,7 @@ export class Hud {
   private score = -1;
   private wave = -1;
   private lives = -1;
+  private multiplier = 1;
   private bannerText = '';
   private boss: BossHud | null = null;
 
@@ -193,11 +194,12 @@ export class Hud {
     });
   }
 
-  set(score: number, wave: number, lives: number): void {
-    if (score === this.score && wave === this.wave && lives === this.lives) return;
+  set(score: number, wave: number, lives: number, multiplier = 1): void {
+    if (score === this.score && wave === this.wave && lives === this.lives && multiplier === this.multiplier) return;
     this.score = score;
     this.wave = wave;
     this.lives = lives;
+    this.multiplier = multiplier;
     this.drawStrip();
   }
 
@@ -236,7 +238,14 @@ export class Hud {
     ctx.textBaseline = 'middle';
 
     ctx.textAlign = 'left';
-    inkText(ctx, String(Math.max(0, this.score)).padStart(6, '0'), pad, mid + height * 0.04, height * 0.62);
+    const digits = String(Math.max(0, this.score)).padStart(6, '0');
+    inkText(ctx, digits, pad, mid + height * 0.04, height * 0.62);
+    if (this.multiplier > 1) {
+      // The combo multiplier rides just after the score, in vermilion.
+      ctx.font = `${height * 0.62}px ${FONT_STACK}`;
+      const after = pad + ctx.measureText(digits).width + height * 0.25;
+      inkText(ctx, `x${this.multiplier}`, after, mid + height * 0.04, height * 0.5, VERMILION);
+    }
 
     if (this.boss != null) {
       this.drawBoss(ctx, width, height, this.boss);

@@ -9,6 +9,7 @@ import {
   VisibilityState,
   XRPlane,
 } from '@iwsdk/core';
+import { SoundScape } from './audio.js';
 import { BambooForest, LANE_AZIMUTHS, type WallSegment } from './bamboo-forest.js';
 import { Boss, BossPhase, Ninja, NinjaPhase } from './game-components.js';
 import { Hud, MistVeil } from './hud.js';
@@ -19,6 +20,7 @@ import { setMistRed } from './mist.js';
 import { RUN_WAIST_HEIGHT } from './scene-assets/ninja-model.js';
 import { createNinja } from './scene-assets/ninja.scene-asset.js';
 import { createSamuraiModel, SAMURAI_WAIST_HEIGHT } from './scene-assets/samurai-model.js';
+import { TutorialHint } from './tutorial-hint.js';
 
 export const GamePhase = {
   Menu: 'Menu',
@@ -30,6 +32,16 @@ export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase];
 
 const STARTING_LIVES = 3;
 const BEST_SCORE_KEY = 'shadow-dojo.best';
+const TUTORIAL_KEY = 'shadow-dojo.tutorial-done';
+const DAILY_KEY_PREFIX = 'shadow-dojo.daily.';
+/** Every this many kills in a row raises the score multiplier, up to MAX_MULTIPLIER. */
+const COMBO_STEP = 5;
+const MAX_MULTIPLIER = 4;
+/** The practice ninja walks in at this speed and stops this far from the player. */
+const PRACTICE_SPEED = 2.5;
+const PRACTICE_DISTANCE = 3;
+/** How often the menu re-checks for detected walls, seconds. */
+const WALL_CHECK_SECONDS = 1.5;
 /** Walls further than this from the player are ignored (other rooms, bad scans). */
 const MAX_WALL_DISTANCE = 8;
 /** Runners start at the back of the bamboo, hidden until they close in. */
@@ -67,6 +79,40 @@ const DEATH_RED = [0, 1.2] as const;
 /** After a restart the red drains back out of the mist over this long. */
 const RED_DRAIN_SECONDS = 1.5;
 
+/** Small seeded PRNG, so a daily run deals every player the same waves. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Today's date in the player's time zone, e.g. 2026-11-17. */
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function readNumber(key: string): number {
+  try {
+    return Number(localStorage.getItem(key) ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeValue(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in private sessions; scores are a nicety.
+  }
+}
+
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -99,6 +145,23 @@ export class GameSystem extends createSystem({
   readonly veil = new MistVeil();
   /** Death strikes, shared with BossSystem. */
   readonly lightning = new Lightning();
+  /** Music and sound, shared with the other systems. */
+  readonly audio = new SoundScape();
+  private hint = new TutorialHint();
+  /** True while the first-run practice ninja is out. */
+  private practice = false;
+  private nextIsPractice = false;
+  private bannerSounded = false;
+  /** 'daily' deals today's seeded waves; 'normal' is fresh every time. */
+  private mode: 'normal' | 'daily' = 'normal';
+  private rng: () => number = Math.random;
+  private dailyBest = 0;
+  /** Kills in a row without a miss or a hit taken, and the score multiplier it earns. */
+  private chain = 0;
+  private multiplier = 1;
+  private noWalls = false;
+  private wallCheck = 0;
+  private practiceTarget = new Vector3();
   /** Ninja death flames. */
   private flames = new Flames();
   private flameBase = new Vector3();
@@ -138,12 +201,30 @@ export class GameSystem extends createSystem({
   /** Lane index of the last ninja spawned, so the next comes from elsewhere. */
   private lastLane = -1;
 
+  /** Random numbers for anything that shapes the waves; seeded on a daily run. */
+  random(): number {
+    return this.rng();
+  }
+
   init(): void {
-    try {
-      this.best = Number(localStorage.getItem(BEST_SCORE_KEY) ?? 0) || 0;
-    } catch {
-      this.best = 0;
-    }
+    this.best = readNumber(BEST_SCORE_KEY);
+    this.dailyBest = readNumber(DAILY_KEY_PREFIX + today());
+    this.world.createTransformEntity(this.hint.mesh);
+    // Audio may only start from a user gesture: any click, key or XR pinch.
+    const unlock = () => {
+      this.audio.unlock();
+      this.audio.setMusic(true);
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    const xr = this.world.renderer.xr;
+    const onSession = () => xr.getSession()?.addEventListener('selectstart', unlock);
+    xr.addEventListener('sessionstart', onSession);
+    this.cleanupFuncs.push(
+      () => window.removeEventListener('pointerdown', unlock),
+      () => window.removeEventListener('keydown', unlock),
+      () => xr.removeEventListener('sessionstart', onSession),
+    );
     this.world.createTransformEntity(this.environment.group);
     this.environment.update(0, 0);
     this.world.createTransformEntity(this.lightning.group);
@@ -156,7 +237,7 @@ export class GameSystem extends createSystem({
     this.world.scene.fog = null;
 
     const menuEntity = this.world.createTransformEntity(this.menu.group);
-    for (const button of [this.menu.start, this.menu.enterXR]) {
+    for (const button of [this.menu.start, this.menu.daily, this.menu.enterXR, this.menu.scan]) {
       const entity = this.world.createTransformEntity(button.mesh, { parent: menuEntity });
       entity.addComponent(RayInteractable);
       this.menuButtons.set(entity, button);
@@ -164,7 +245,11 @@ export class GameSystem extends createSystem({
     this.queries.pressed.subscribe('qualify', (entity) => {
       const button = this.menuButtons.get(entity);
       if (button == null || !button.visible || !this.menu.group.visible) return;
-      if (button === this.menu.start) this.startGame();
+      unlock();
+      this.audio.click();
+      if (button === this.menu.start) this.startGame('normal');
+      else if (button === this.menu.daily) this.startGame('daily');
+      else if (button === this.menu.scan) void this.world.session?.initiateRoomCapture?.().catch(() => undefined);
       else this.world.launchXR();
     });
     this.cleanupFuncs.push(
@@ -199,6 +284,9 @@ export class GameSystem extends createSystem({
     this.flames.update(delta, this.head);
     this.updatePanelPlacement(delta);
     for (const [entity, button] of this.menuButtons) button.setHovered(entity.hasComponent(Hovered));
+    this.audio.updateListener(this.world.camera);
+    this.audio.tick();
+    this.checkWalls(delta);
 
     // The forest stays up through game over, ringed in red mist.
     const revealTarget = this.phase === GamePhase.Menu ? 0 : 1;
@@ -209,6 +297,10 @@ export class GameSystem extends createSystem({
     this.updateTransition(delta);
 
     if (this.phase !== GamePhase.Playing) return;
+    if (this.practice) {
+      this.updatePractice(delta);
+      return;
+    }
     if (this.bossRound) {
       this.updateBossHud();
       return;
@@ -218,7 +310,7 @@ export class GameSystem extends createSystem({
     if (this.toSpawn > 0 && this.spawnTimer <= 0 && this.queries.ninjas.entities.size < this.maxConcurrent()) {
       this.spawnNinja();
       this.toSpawn--;
-      this.spawnTimer = Math.max(0.5, 1.6 - this.wave * 0.12) * (0.7 + Math.random() * 0.6);
+      this.spawnTimer = Math.max(0.5, 1.6 - this.wave * 0.12) * (0.7 + this.rng() * 0.6);
       // Never end the wave on the frame its last ninja appears.
       return;
     }
@@ -229,12 +321,15 @@ export class GameSystem extends createSystem({
   }
 
   /** Mist over everything, announce what comes next, then let it sink. */
-  private startTransition(toBoss: boolean, delay = 0): void {
+  private startTransition(toBoss: boolean, delay = 0, toPractice = false): void {
     this.setPhase(GamePhase.Intermission);
     this.transition = 0;
     this.transitionDelay = delay;
     this.nextIsBoss = toBoss;
-    this.bannerText = toBoss ? BOSS_BANNER : `WAVE ${this.wave + 1}`;
+    this.nextIsPractice = toPractice;
+    this.bannerSounded = false;
+    // The practice round is wordless: no banner.
+    this.bannerText = toPractice ? '' : toBoss ? BOSS_BANNER : `WAVE ${this.wave + 1}`;
   }
 
   private updateTransition(delta: number): void {
@@ -246,8 +341,13 @@ export class GameSystem extends createSystem({
       const t = (this.transition += delta);
       veil = smoothstep(VEIL_RISE[0], VEIL_RISE[1], t) * (1 - smoothstep(VEIL_FALL[0], VEIL_FALL[1], t));
       banner = smoothstep(BANNER_IN[0], BANNER_IN[1], t) * (1 - smoothstep(BANNER_OUT[0], BANNER_OUT[1], t));
+      if (!this.bannerSounded && t >= BANNER_IN[0]) {
+        this.bannerSounded = true;
+        if (this.bannerText !== '') this.audio.banner(this.nextIsBoss);
+      }
       if (this.phase === GamePhase.Intermission && t >= NEXT_WAVE_AT) {
-        if (this.nextIsBoss) this.beginBoss();
+        if (this.nextIsPractice) this.beginPractice();
+        else if (this.nextIsBoss) this.beginBoss();
         else this.beginWave(this.wave + 1);
       }
       if (t >= VEIL_FALL[1]) this.transition = -1;
@@ -266,15 +366,18 @@ export class GameSystem extends createSystem({
 
   /** Called by BossSystem when a star lands on the samurai. */
   onBossHit(): void {
-    this.score += BOSS_HIT_SCORE;
+    this.addKill();
+    this.score += BOSS_HIT_SCORE * this.multiplier;
     this.refreshHud();
   }
 
   /** Called by BossSystem on the final hit. */
   onBossDefeated(): void {
     if (this.phase !== GamePhase.Playing) return;
-    this.score += BOSS_HIT_SCORE + BOSS_DEFEAT_SCORE;
+    this.addKill();
+    this.score += (BOSS_HIT_SCORE + BOSS_DEFEAT_SCORE) * this.multiplier;
     this.bossesBeaten++;
+    this.audio.setTension(0);
     this.bossRound = false;
     this.hud.setBoss(null);
     this.refreshHud();
@@ -295,9 +398,34 @@ export class GameSystem extends createSystem({
     // It evaporates where it stands into an S of spirit flame.
     this.flameBase.set(position.x, Math.max(0, position.y - RUN_WAIST_HEIGHT), position.z);
     this.flames.ignite(this.flameBase);
+    this.audio.ninjaDefeated(position);
+    if (this.practice) {
+      this.finishPractice();
+      return;
+    }
+    this.addKill();
     // Picking one off while it's still deep in the mist pays extra.
     const bonus = distanceToPlayer > 6 ? 50 : 0;
-    this.score += 100 + bonus;
+    this.score += (100 + bonus) * this.multiplier;
+    this.refreshHud();
+  }
+
+  /** Called by ThrowSystem when a star flies off without hitting anything. */
+  onStarMissed(): void {
+    if (this.phase === GamePhase.Playing && !this.practice) this.breakCombo();
+  }
+
+  private addKill(): void {
+    this.chain++;
+    const multiplier = Math.min(MAX_MULTIPLIER, 1 + Math.floor(this.chain / COMBO_STEP));
+    if (multiplier > this.multiplier) this.audio.comboUp(multiplier);
+    this.multiplier = multiplier;
+  }
+
+  private breakCombo(): void {
+    if (this.multiplier > 1) this.audio.comboLost();
+    this.chain = 0;
+    this.multiplier = 1;
     this.refreshHud();
   }
 
@@ -305,7 +433,8 @@ export class GameSystem extends createSystem({
   onPlayerHit(): void {
     if (this.phase !== GamePhase.Playing) return;
     this.lives--;
-    this.refreshHud();
+    this.audio.playerHit();
+    this.breakCombo();
     if (this.lives <= 0) this.endGame();
   }
 
@@ -323,10 +452,15 @@ export class GameSystem extends createSystem({
     return Math.min(5, 1 + Math.ceil(this.wave / 2));
   }
 
-  private startGame(): void {
+  private startGame(mode: 'normal' | 'daily'): void {
     if (this.phase === GamePhase.Playing || this.phase === GamePhase.Intermission) {
       return;
     }
+    this.mode = mode;
+    this.rng = mode === 'daily' ? mulberry32(this.dailySeed()) : Math.random;
+    this.lastLane = -1;
+    this.chain = 0;
+    this.multiplier = 1;
     this.score = 0;
     this.lives = STARTING_LIVES;
     this.wave = 0;
@@ -337,14 +471,16 @@ export class GameSystem extends createSystem({
     // A samurai left standing over the last game leaves with it.
     for (const boss of this.queries.bosses.entities) boss.dispose({ disposeResources: false });
     this.openEnvironment();
-    // The forest grows in behind the first mist surge, which announces wave 1.
-    this.startTransition(false);
+    // The forest grows in behind the first mist surge, which announces wave 1;
+    // the very first time, a wordless practice round comes first.
+    this.startTransition(false, 0, readNumber(TUTORIAL_KEY) === 0);
     this.refreshHud();
     this.setPanelVisible(false);
     this.hud.setVisible(true);
   }
 
   private beginWave(wave: number): void {
+    this.audio.setTension(0);
     this.wave = wave;
     this.toSpawn = 3 + wave * 2;
     this.spawnTimer = FIRST_SPAWN_DELAY;
@@ -370,12 +506,14 @@ export class GameSystem extends createSystem({
       maxHp,
       attackAt: Math.max(BOSS_MIN_TIME, BOSS_TIME - this.bossesBeaten * BOSS_TIME_STEP),
       angle,
-      spin: (Math.random() < 0.5 ? -1 : 1) * 0.55,
+      spin: (this.rng() < 0.5 ? -1 : 1) * 0.55,
       // Inside the walls so he is seen, weaving out into the mist.
       radius: Math.min(3.4, Math.max(1.8, this.environment.roomRadius - 0.5)),
-      turnIn: 3 + Math.random() * 2,
+      turnIn: 3 + this.rng() * 2,
     });
     boss.getVectorView(Boss, 'center').set([origin.x, 0, origin.z]);
+    this.audio.setTension(1);
+    this.audio.samuraiRoar(object);
     this.refreshHud();
     this.updateBossHud();
   }
@@ -392,11 +530,14 @@ export class GameSystem extends createSystem({
     if (boss == null) return;
     const attackAt = boss.getValue(Boss, 'attackAt') ?? 30;
     const clock = boss.getValue(Boss, 'clock') ?? 0;
+    const timeLeft = Math.max(0, 1 - clock / attackAt);
     this.hud.setBoss({
       hp: boss.getValue(Boss, 'hp') ?? 0,
       maxHp: boss.getValue(Boss, 'maxHp') ?? 1,
-      timeLeft: Math.max(0, 1 - clock / attackAt),
+      timeLeft,
     });
+    // The drums quicken as his time runs out.
+    this.audio.setTension(1, 1 - timeLeft);
   }
 
   private endGame(title = 'The shadows win'): void {
@@ -410,26 +551,105 @@ export class GameSystem extends createSystem({
       ninja.setValue(Ninja, 'phase', NinjaPhase.Defeated);
       ninja.setValue(Ninja, 'timer', 0);
     }
-    const newBest = this.score > this.best;
+    this.practice = false;
+    this.hint.hide();
+    this.audio.setTension(0);
+    this.audio.gameOver();
+    const daily = this.mode === 'daily';
+    const previous = daily ? this.dailyBest : this.best;
+    const newBest = this.score > previous;
     if (newBest) {
-      this.best = this.score;
-      try {
-        localStorage.setItem(BEST_SCORE_KEY, String(this.best));
-      } catch {
-        // Storage can be unavailable in private sessions; the best score is a nicety.
+      if (daily) {
+        this.dailyBest = this.score;
+        writeValue(DAILY_KEY_PREFIX + today(), String(this.score));
+      } else {
+        this.best = this.score;
+        writeValue(BEST_SCORE_KEY, String(this.score));
       }
     }
-    this.menu.show({ kind: 'over', title, score: this.score, wave: this.wave, best: this.best, newBest });
+    this.menu.show({
+      kind: 'over',
+      title,
+      score: this.score,
+      wave: this.wave,
+      best: daily ? this.dailyBest : this.best,
+      newBest,
+      daily,
+    });
     this.setPanelVisible(true);
     this.placePanel(0.85, -0.12);
   }
 
   private showMenu(): void {
     this.setPhase(GamePhase.Menu);
-    this.menu.show({ kind: 'title', best: this.best });
+    this.showTitle();
     this.setPanelVisible(true);
     this.placePanel(0.85, -0.12);
     this.refreshHud();
+  }
+
+  private showTitle(): void {
+    this.menu.show({ kind: 'title', best: this.best, dailyBest: this.dailyBest, noWalls: this.noWalls });
+  }
+
+  /** On the title screen in a headset, keep checking whether any walls were found. */
+  private checkWalls(delta: number): void {
+    const immersive = this.world.visibilityState.peek() !== VisibilityState.NonImmersive;
+    if (this.phase !== GamePhase.Menu || !immersive) {
+      this.wallCheck = 0;
+      return;
+    }
+    this.wallCheck += delta;
+    // Give plane detection a moment after the session starts.
+    if (this.wallCheck < WALL_CHECK_SECONDS * 2) return;
+    this.wallCheck -= WALL_CHECK_SECONDS;
+    this.readHead();
+    const noWalls = this.wallSegments().length === 0;
+    if (noWalls !== this.noWalls) {
+      this.noWalls = noWalls;
+      this.showTitle();
+    }
+  }
+
+  private dailySeed(): number {
+    let h = 2166136261;
+    for (const c of today()) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+    return h >>> 0;
+  }
+
+  /** First run only: one ninja walks in, stops and waits, with the pinch hint over it. */
+  private beginPractice(): void {
+    this.practice = true;
+    this.setPhase(GamePhase.Playing);
+    this.readHead();
+    // Straight down the middle lane, already close enough to see clearly.
+    const lane = LANE_AZIMUTHS[Math.floor(LANE_AZIMUTHS.length / 2)];
+    this.environment.pointAt(lane, 9, this.point).setY(RUN_WAIST_HEIGHT);
+    const object = this.ninjaPrototype.clone();
+    object.position.copy(this.point);
+    const ninja = this.world.createTransformEntity(object);
+    ninja.addComponent(Ninja, { phase: NinjaPhase.Running, speed: PRACTICE_SPEED, practice: true });
+    this.practiceTarget.subVectors(this.point, this.head).setY(0).normalize();
+    this.practiceTarget.multiplyScalar(PRACTICE_DISTANCE).add(this.head);
+    ninja.getVectorView(Ninja, 'target').set([this.practiceTarget.x, RUN_WAIST_HEIGHT, this.practiceTarget.z]);
+    this.audio.whisper(this.point);
+  }
+
+  private updatePractice(delta: number): void {
+    for (const ninja of this.queries.ninjas.entities) {
+      if (ninja.object3D == null || ninja.getValue(Ninja, 'phase') === NinjaPhase.Defeated) continue;
+      this.hint.update(delta, ninja.object3D.position, this.head);
+      return;
+    }
+    this.hint.hide();
+  }
+
+  private finishPractice(): void {
+    this.practice = false;
+    this.hint.hide();
+    writeValue(TUTORIAL_KEY, '1');
+    // Let the flame burn, then roll the mist in for wave 1.
+    this.startTransition(false, 0.8);
   }
 
   private setPhase(phase: GamePhase): void {
@@ -438,7 +658,7 @@ export class GameSystem extends createSystem({
   }
 
   private refreshHud(): void {
-    this.hud.set(this.score, this.wave, this.lives);
+    this.hud.set(this.score, this.wave, this.lives, this.multiplier);
   }
 
   /** The menu panel is only for menus; the round uses the head-locked HUD. */
@@ -524,12 +744,12 @@ export class GameSystem extends createSystem({
     // Come down one of the paths kept clear through the bamboo.
     // Never the same lane twice running.
     const choices = this.lastLane < 0 ? LANE_AZIMUTHS.length : LANE_AZIMUTHS.length - 1;
-    let index = Math.floor(Math.random() * choices);
+    let index = Math.floor(this.rng() * choices);
     if (this.lastLane >= 0 && index >= this.lastLane) index++;
     this.lastLane = index;
     const lane = LANE_AZIMUTHS[index];
-    const azimuth = lane + (Math.random() - 0.5) * 0.02;
-    const radius = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
+    const azimuth = lane + (this.rng() - 0.5) * 0.02;
+    const radius = SPAWN_RADIUS_MIN + this.rng() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
     this.environment.pointAt(azimuth, radius, this.point).setY(RUN_WAIST_HEIGHT);
 
     const object = this.ninjaPrototype.clone();
@@ -537,11 +757,13 @@ export class GameSystem extends createSystem({
     const ninja = this.world.createTransformEntity(object);
     ninja.addComponent(Ninja, {
       phase: NinjaPhase.Running,
-      timer: Math.random(),
-      speed: this.runSpeed() * (0.9 + Math.random() * 0.2),
+      timer: this.rng(),
+      speed: this.runSpeed() * (0.9 + this.rng() * 0.2),
       leapDuration: this.leapDuration(),
-      arcHeight: 0.15 + Math.random() * 0.2,
+      arcHeight: 0.15 + this.rng() * 0.2,
     });
+    // It slips out of the bamboo as a whisper from that direction.
+    this.audio.whisper(this.point);
     // Run at the spot on the floor beneath the player's head.
     ninja.getVectorView(Ninja, 'target').set([this.head.x, RUN_WAIST_HEIGHT, this.head.z]);
   }

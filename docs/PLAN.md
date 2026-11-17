@@ -69,6 +69,13 @@ The playable vertical slice was verified in IWER, IWSDK's browser XR emulator (Q
   (crossed-ribbon geometry, white core with a violet edge so it reads on bright ceilings) that climbs
   from the body into the sky. He shudders under a barrage of seven, then evaporates up a final heavy
   bolt before the next wave's mist rolls in.
+- `src/audio.ts`: every sound, synthesized with Web Audio (no samples). Generative music: drone,
+  wind, a breathy pan flute on the miyako-bushi scale, sparse koto-like plucks, and taiko under the
+  samurai that quickens as his timer runs out. Ninjas whisper from where they leave the bamboo and
+  exhale on the leap; the samurai roars, grunts, bellows and cries through a formant-filtered,
+  distorted voice. Spatial sounds use HRTF panners; the listener follows the head.
+- `src/tutorial-hint.ts`: the wordless first-run lesson: an ink hand over the practice ninja that
+  alternates pointing and pinching.
 - `src/flame.ts`: ninja deaths. A pooled, upright quad turned to face the player, with an S-shaped
   flame drawn in its shader in the lightning's colours. The struck ninja burns white and withers in
   place inside it.

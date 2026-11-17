@@ -17,6 +17,8 @@ export const Ninja = createComponent('Ninja', {
   speed: { type: Types.Float32, default: 12 },
   leapDuration: { type: Types.Float32, default: 0.6 },
   arcHeight: { type: Types.Float32, default: 0.25 },
+  /** The first-run practice target: walks in slowly, stops and waits to be hit. */
+  practice: { type: Types.Boolean, default: false },
   /** Leap start; written at takeoff. */
   origin: { type: Types.Vec3, default: [0, 0.84, -3] },
   /** Running: floor point to run at. Leaping: strike point in front of the face. */
